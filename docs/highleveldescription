@@ -14,5 +14,7 @@ l) if relevant information about a component of the template is not found in the
 m) administrators of the system can describe the template using natural language and the system renders the template visually and they can rate the template.
 n) administrators can use a natural language interface to modify the template once it is rendnered.
 o) administrators can modify the template in a multiuser visual teamplate editor.
-p) system remembers the prompts and user feedback on the template such that it can use this memory to generate a better template for a similar prompt next time.   
+p) system remembers the prompts and user feedback on the template such that it can use this memory to generate a better template for a similar prompt next time. 
+q) administrators can specify metadata that each component of the diagram should indicate visually and also specify guidelines for discovering the metadata from the corpus.
+r) users can use one or more LLMs or AI services to perform discovery of information for the diagram.
   
