@@ -184,14 +184,14 @@ describe('DiagramService', () => {
     const diagram = service.getDiagram(job.diagramId);
     expect(diagram).not.toBeNull();
 
-    // Some components should be greyed out based on random logic
+    // Components should be either populated or greyed out based on keyword detection
     const greyedOut = diagram!.components.filter(c => c.status === 'GREYED_OUT');
     const populated = diagram!.components.filter(c => c.status === 'POPULATED');
 
-    // Core components should be populated
+    // Some components should be populated based on keyword matches
     expect(populated.length).toBeGreaterThan(0);
-    // At least the core 4 should be populated
-    expect(populated.length).toBeGreaterThanOrEqual(4);
+    // All components should have a status
+    expect(populated.length + greyedOut.length).toBe(11);
   });
 
   it('should create edges between components', async () => {

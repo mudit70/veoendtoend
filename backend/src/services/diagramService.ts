@@ -1,6 +1,7 @@
 import type { Diagram, DiagramComponent, DiagramEdge, ComponentType, Job } from '@veoendtoend/shared';
 import { db } from '../database';
 import { v4 as uuidv4 } from 'uuid';
+import { extractionEngine } from './extractionEngine';
 
 export interface DiagramJob extends Job {
   diagramId: string;
@@ -121,7 +122,21 @@ export class DiagramService {
       // Get documents for the operation's project
       const documents = db.getDocumentsByProjectId(operation.projectId);
 
-      // Create components (in a real implementation, this would use LLM)
+      // Convert documents to extraction engine format
+      const docContents = documents.map(d => ({
+        id: d.id,
+        filename: d.filename,
+        content: d.extractedText || d.content,
+      }));
+
+      // Use extraction engine to get component details
+      const extractionResults = await extractionEngine.extractAllComponents(
+        operation.name,
+        operation.description,
+        docContents
+      );
+
+      // Create components using extraction results
       const components: DiagramComponent[] = [];
       const componentMap = new Map<ComponentType, string>();
       const now = new Date().toISOString();
@@ -131,28 +146,27 @@ export class DiagramService {
         const componentId = uuidv4();
         componentMap.set(template.type, componentId);
 
-        // Determine if we have data for this component (mock logic)
-        const hasData = this.componentHasData(template.type, operation, documents);
+        // Get extraction result for this component type
+        const extraction = extractionResults.get(template.type);
+        const hasData = extraction?.hasData ?? false;
 
         const component: DiagramComponent = {
           id: componentId,
           diagramId,
           componentType: template.type,
-          title: template.title,
-          description: hasData
-            ? this.getComponentDescription(template.type, operation)
-            : 'No relevant data found in documents',
+          title: extraction?.title || template.title,
+          description: extraction?.description || 'No relevant data found in documents',
           status: hasData ? 'POPULATED' : 'GREYED_OUT',
-          confidence: hasData ? 0.85 : 0,
+          confidence: extraction?.confidence ?? 0,
           position: template.position,
           isUserModified: false,
           createdAt: now,
           updatedAt: now,
         };
 
-        if (hasData && documents.length > 0) {
-          component.sourceDocumentId = documents[0].id;
-          component.sourceExcerpt = `Relevant excerpt for ${template.title}`;
+        if (hasData && extraction?.sourceDocumentId) {
+          component.sourceDocumentId = extraction.sourceDocumentId;
+          component.sourceExcerpt = extraction.sourceExcerpt;
         }
 
         components.push(component);
@@ -205,50 +219,6 @@ export class DiagramService {
       diagram.status = 'FAILED';
       diagram.updatedAt = new Date().toISOString();
     }
-  }
-
-  private componentHasData(
-    componentType: ComponentType,
-    _operation: { name: string; description: string; type: string },
-    documents: { content: string }[]
-  ): boolean {
-    // Mock logic: determine if documents contain relevant data for this component
-    const hasDocuments = documents.length > 0;
-
-    // Always populate core components
-    if (['USER_ACTION', 'CLIENT_CODE', 'API_ENDPOINT', 'BACKEND_LOGIC'].includes(componentType)) {
-      return true;
-    }
-
-    // Conditionally populate based on document presence
-    if (['DATABASE', 'VIEW_UPDATE'].includes(componentType)) {
-      return hasDocuments;
-    }
-
-    // Infrastructure components may or may not have data
-    if (['FIREWALL', 'WAF', 'LOAD_BALANCER', 'API_GATEWAY'].includes(componentType)) {
-      return hasDocuments && Math.random() > 0.3;
-    }
-
-    // Event handler
-    return hasDocuments && Math.random() > 0.5;
-  }
-
-  private getComponentDescription(componentType: ComponentType, operation: { name: string; description: string }): string {
-    const descriptions: Record<ComponentType, string> = {
-      USER_ACTION: `User initiates ${operation.name}`,
-      CLIENT_CODE: `Client handles ${operation.name} request`,
-      FIREWALL: 'Network firewall filters incoming traffic',
-      WAF: 'Web Application Firewall validates request',
-      LOAD_BALANCER: 'Distributes request to available servers',
-      API_GATEWAY: 'Routes request to appropriate service',
-      API_ENDPOINT: `Endpoint processes ${operation.name}`,
-      BACKEND_LOGIC: `Business logic for ${operation.name}`,
-      DATABASE: 'Persists or retrieves data',
-      EVENT_HANDLER: 'Handles async events',
-      VIEW_UPDATE: 'Updates client view with response',
-    };
-    return descriptions[componentType] || operation.description;
   }
 
   getJob(jobId: string): DiagramJob | null {
