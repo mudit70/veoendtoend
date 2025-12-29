@@ -6,6 +6,7 @@ import { notFoundHandler } from './middleware/notFoundHandler.js';
 import { healthRouter } from './routes/health.js';
 import { projectsRouter } from './routes/projects.js';
 import { documentsRouter } from './routes/documents.js';
+import { discoveryRouter } from './routes/discovery.js';
 import { initializeDatabase } from './database/init.js';
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api/health', healthRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api', discoveryRouter);
 
 // Error handling
 app.use(notFoundHandler);
