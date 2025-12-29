@@ -19,8 +19,12 @@ export interface Document {
   filepath?: string; // relative path within source folder/repo
   mimeType: string;
   content: string;
+  extractedText?: string; // extracted text content (for PDFs, etc.)
   hash: string;
   size: number;
+  wordCount?: number;
+  lineCount?: number;
+  pageCount?: number; // for PDFs
   sourceType: DocumentSourceType;
   sourcePath?: string; // folder path or repo URL
   sourceName?: string; // friendly name for the source

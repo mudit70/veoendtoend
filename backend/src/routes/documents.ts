@@ -1,12 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import os from 'os';
 import { getDatabase } from '../database/connection.js';
+import { documentProcessor } from '../services/documentProcessor.js';
 import type { Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult } from '@veoendtoend/shared';
 
 const router = Router();
@@ -67,8 +67,12 @@ function mapRowToDocument(row: Record<string, unknown>): Document {
     filepath: row.filepath as string | undefined,
     mimeType: row.mime_type as string,
     content: row.content as string,
+    extractedText: row.extracted_text as string | undefined,
     hash: row.hash as string,
     size: row.size as number,
+    wordCount: row.word_count as number | undefined,
+    lineCount: row.line_count as number | undefined,
+    pageCount: row.page_count as number | undefined,
     sourceType: row.source_type as Document['sourceType'],
     sourcePath: row.source_path as string | undefined,
     sourceName: row.source_name as string | undefined,
@@ -209,13 +213,28 @@ router.post(
 
     const id = uuidv4();
     const now = new Date().toISOString();
-    const content = req.file.buffer.toString('utf-8');
-    const hash = crypto.createHash('sha256').update(content).digest('hex');
+
+    // Process document using documentProcessor
+    const processed = await documentProcessor.process(req.file.buffer, req.file.mimetype, req.file.originalname);
 
     db.prepare(`
-      INSERT INTO documents (id, project_id, filename, mime_type, content, hash, size, source_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'UPLOAD', ?, ?)
-    `).run(id, req.params.projectId, req.file.originalname, req.file.mimetype, content, hash, req.file.size, now, now);
+      INSERT INTO documents (id, project_id, filename, mime_type, content, extracted_text, hash, size, word_count, line_count, page_count, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UPLOAD', ?, ?)
+    `).run(
+      id,
+      req.params.projectId,
+      req.file.originalname,
+      req.file.mimetype,
+      processed.content,
+      processed.extractedText,
+      processed.hash,
+      processed.size,
+      processed.metadata.wordCount,
+      processed.metadata.lineCount,
+      processed.metadata.pageCount || null,
+      now,
+      now
+    );
 
     const row = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Record<string, unknown>;
 
@@ -260,17 +279,30 @@ router.post(
     const now = new Date().toISOString();
 
     const insertStmt = db.prepare(`
-      INSERT INTO documents (id, project_id, filename, mime_type, content, hash, size, source_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'UPLOAD', ?, ?)
+      INSERT INTO documents (id, project_id, filename, mime_type, content, extracted_text, hash, size, word_count, line_count, page_count, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UPLOAD', ?, ?)
     `);
 
     for (const file of files) {
       try {
         const id = uuidv4();
-        const content = file.buffer.toString('utf-8');
-        const hash = crypto.createHash('sha256').update(content).digest('hex');
+        const processed = await documentProcessor.process(file.buffer, file.mimetype, file.originalname);
 
-        insertStmt.run(id, req.params.projectId, file.originalname, file.mimetype, content, hash, file.size, now, now);
+        insertStmt.run(
+          id,
+          req.params.projectId,
+          file.originalname,
+          file.mimetype,
+          processed.content,
+          processed.extractedText,
+          processed.hash,
+          processed.size,
+          processed.metadata.wordCount,
+          processed.metadata.lineCount,
+          processed.metadata.pageCount || null,
+          now,
+          now
+        );
 
         const row = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as Record<string, unknown>;
         documents.push(mapRowToDocument(row));
@@ -331,8 +363,8 @@ router.post(
     const now = new Date().toISOString();
 
     const insertStmt = db.prepare(`
-      INSERT INTO documents (id, project_id, filename, filepath, mime_type, content, hash, size, source_type, source_path, source_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'FOLDER', ?, ?, ?, ?)
+      INSERT INTO documents (id, project_id, filename, filepath, mime_type, content, extracted_text, hash, size, word_count, line_count, page_count, source_type, source_path, source_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'FOLDER', ?, ?, ?, ?)
     `);
 
     let totalFiles = 0;
@@ -355,12 +387,12 @@ router.post(
 
       for (const filePath of files) {
         try {
-          const content = fs.readFileSync(filePath, 'utf-8');
-          const hash = crypto.createHash('sha256').update(content).digest('hex');
-          const stats = fs.statSync(filePath);
+          const buffer = fs.readFileSync(filePath);
           const filename = path.basename(filePath);
           const relativePath = path.relative(folderPath, filePath);
           const mimeType = getMimeType(filename);
+
+          const processed = await documentProcessor.process(buffer, mimeType, filename);
 
           const id = uuidv4();
           insertStmt.run(
@@ -369,9 +401,13 @@ router.post(
             filename,
             relativePath,
             mimeType,
-            content,
-            hash,
-            stats.size,
+            processed.content,
+            processed.extractedText,
+            processed.hash,
+            processed.size,
+            processed.metadata.wordCount,
+            processed.metadata.lineCount,
+            processed.metadata.pageCount || null,
             folderPath,
             sourceName,
             now,
@@ -438,8 +474,8 @@ router.post(
     const now = new Date().toISOString();
 
     const insertStmt = db.prepare(`
-      INSERT INTO documents (id, project_id, filename, filepath, mime_type, content, hash, size, source_type, source_path, source_name, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'REPOSITORY', ?, ?, ?, ?)
+      INSERT INTO documents (id, project_id, filename, filepath, mime_type, content, extracted_text, hash, size, word_count, line_count, page_count, source_type, source_path, source_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REPOSITORY', ?, ?, ?, ?)
     `);
 
     let totalFiles = 0;
@@ -472,12 +508,12 @@ router.post(
 
         for (const filePath of files) {
           try {
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const hash = crypto.createHash('sha256').update(content).digest('hex');
-            const stats = fs.statSync(filePath);
+            const buffer = fs.readFileSync(filePath);
             const filename = path.basename(filePath);
             const relativePath = path.relative(tempDir, filePath);
             const mimeType = getMimeType(filename);
+
+            const processed = await documentProcessor.process(buffer, mimeType, filename);
 
             const id = uuidv4();
             insertStmt.run(
@@ -486,9 +522,13 @@ router.post(
               filename,
               relativePath,
               mimeType,
-              content,
-              hash,
-              stats.size,
+              processed.content,
+              processed.extractedText,
+              processed.hash,
+              processed.size,
+              processed.metadata.wordCount,
+              processed.metadata.lineCount,
+              processed.metadata.pageCount || null,
               repoUrl,
               sourceName,
               now,
