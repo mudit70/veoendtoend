@@ -10,16 +10,50 @@ export interface Project {
 }
 
 // Document types
+export type DocumentSourceType = 'UPLOAD' | 'FOLDER' | 'REPOSITORY';
+
 export interface Document {
   id: string;
   projectId: string;
   filename: string;
+  filepath?: string; // relative path within source folder/repo
   mimeType: string;
   content: string;
   hash: string;
   size: number;
+  sourceType: DocumentSourceType;
+  sourcePath?: string; // folder path or repo URL
+  sourceName?: string; // friendly name for the source
   createdAt: string;
   updatedAt: string;
+}
+
+// Import request types
+export interface FolderImportRequest {
+  folders: {
+    path: string;
+    name?: string; // optional friendly name
+    recursive?: boolean;
+  }[];
+  fileTypes?: string[]; // e.g., ['.txt', '.md', '.json', '.pdf']
+}
+
+export interface RepoImportRequest {
+  repositories: {
+    url: string;
+    name?: string; // optional friendly name
+    branch?: string;
+    authToken?: string;
+  }[];
+  fileTypes?: string[]; // e.g., ['.txt', '.md', '.json', '.pdf']
+}
+
+export interface ImportResult {
+  totalFiles: number;
+  importedFiles: number;
+  skippedFiles: number;
+  errors: { file: string; error: string }[];
+  documents: Document[];
 }
 
 // Operation types

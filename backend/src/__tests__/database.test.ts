@@ -46,8 +46,8 @@ describe('Database', () => {
   it('should enforce foreign key constraints', () => {
     // Try to insert a document without a valid project_id
     const stmt = db.prepare(`
-      INSERT INTO documents (id, project_id, filename, mime_type, content, hash, size, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO documents (id, project_id, filename, mime_type, content, hash, size, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'UPLOAD', ?, ?)
     `);
 
     expect(() =>
@@ -66,8 +66,8 @@ describe('Database', () => {
 
     // Insert a document
     db.prepare(`
-      INSERT INTO documents (id, project_id, filename, mime_type, content, hash, size, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO documents (id, project_id, filename, mime_type, content, hash, size, source_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'UPLOAD', ?, ?)
     `).run('doc-1', 'project-1', 'test.txt', 'text/plain', 'content', 'hash', 7, now, now);
 
     // Verify the insertions

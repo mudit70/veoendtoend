@@ -1,4 +1,4 @@
-import type { Project, Document, ApiResponse } from '@veoendtoend/shared';
+import type { Project, Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult } from '@veoendtoend/shared';
 
 const API_BASE_URL = '/api';
 
@@ -96,8 +96,78 @@ export const apiClient = {
     return data;
   },
 
+  async uploadDocumentsBatch(
+    projectId: string,
+    files: File[]
+  ): Promise<ApiResponse<ImportResult>> {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const response = await fetch(`${API_BASE_URL}/documents/project/${projectId}/batch`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Batch upload failed');
+    }
+
+    return data;
+  },
+
+  async importFromFolders(
+    projectId: string,
+    request: FolderImportRequest
+  ): Promise<ApiResponse<ImportResult>> {
+    return await fetch(`${API_BASE_URL}/documents/project/${projectId}/from-folders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Folder import failed');
+      }
+      return data;
+    });
+  },
+
+  async importFromRepos(
+    projectId: string,
+    request: RepoImportRequest
+  ): Promise<ApiResponse<ImportResult>> {
+    return await fetch(`${API_BASE_URL}/documents/project/${projectId}/from-repos`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Repository import failed');
+      }
+      return data;
+    });
+  },
+
   async deleteDocument(id: string): Promise<ApiResponse<void>> {
     return request(`/documents/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async deleteDocumentsBySource(
+    projectId: string,
+    sourceName: string
+  ): Promise<ApiResponse<{ message: string }>> {
+    return request(`/documents/project/${projectId}/source/${encodeURIComponent(sourceName)}`, {
       method: 'DELETE',
     });
   },

@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
-import type { Project, Document } from '@veoendtoend/shared';
+import type { Project, Document, FolderImportRequest, RepoImportRequest } from '@veoendtoend/shared';
+import DocumentUpload from '../components/DocumentUpload';
+import DocumentList from '../components/DocumentList';
+import FolderImportModal from '../components/FolderImportModal';
+import RepoImportModal from '../components/RepoImportModal';
 
 function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -9,7 +13,8 @@ function ProjectDetailPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [showFolderModal, setShowFolderModal] = useState(false);
+  const [showRepoModal, setShowRepoModal] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -36,31 +41,60 @@ function ProjectDetailPage() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!id || !e.target.files?.length) return;
+  const handleFileUpload = async (files: File[]) => {
+    if (!id) return;
 
-    const file = e.target.files[0];
     try {
-      setUploading(true);
-      await apiClient.uploadDocument(id, file);
+      if (files.length === 1) {
+        await apiClient.uploadDocument(id, files[0]);
+      } else {
+        await apiClient.uploadDocumentsBatch(id, files);
+      }
       await loadProjectAndDocuments();
     } catch (err) {
-      setError('Failed to upload document');
+      setError('Failed to upload documents');
       console.error(err);
-    } finally {
-      setUploading(false);
-      e.target.value = '';
     }
   };
 
-  const handleDeleteDocument = async (documentId: string) => {
-    if (!confirm('Are you sure you want to delete this document?')) return;
+  const handleFolderImport = async (request: FolderImportRequest) => {
+    if (!id) return;
 
+    const result = await apiClient.importFromFolders(id, request);
+    if (result.data?.errors && result.data.errors.length > 0) {
+      setError(`Imported ${result.data.importedFiles} files. ${result.data.errors.length} errors occurred.`);
+    }
+    await loadProjectAndDocuments();
+  };
+
+  const handleRepoImport = async (request: RepoImportRequest) => {
+    if (!id) return;
+
+    const result = await apiClient.importFromRepos(id, request);
+    if (result.data?.errors && result.data.errors.length > 0) {
+      setError(`Imported ${result.data.importedFiles} files. ${result.data.errors.length} errors occurred.`);
+    }
+    await loadProjectAndDocuments();
+  };
+
+  const handleDeleteDocument = async (documentId: string) => {
     try {
       await apiClient.deleteDocument(documentId);
       await loadProjectAndDocuments();
     } catch (err) {
       setError('Failed to delete document');
+      console.error(err);
+    }
+  };
+
+  const handleDeleteSource = async (sourceName: string) => {
+    if (!id) return;
+
+    try {
+      await apiClient.deleteDocumentsBySource(id, sourceName);
+      await loadProjectAndDocuments();
+    } catch (err) {
+      setError('Failed to delete documents');
       console.error(err);
     }
   };
@@ -103,54 +137,54 @@ function ProjectDetailPage() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-700 p-4 rounded-md mb-4">{error}</div>
+        <div className="bg-red-50 text-red-700 p-4 rounded-md mb-4 flex justify-between items-center">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+            Dismiss
+          </button>
+        </div>
       )}
+
+      <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
+        <h2 className="text-xl font-semibold mb-4">Import Documents</h2>
+
+        <DocumentUpload onUpload={handleFileUpload} />
+
+        <div className="mt-4 flex gap-3">
+          <button
+            onClick={() => setShowFolderModal(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            <svg className="h-5 w-5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            Import from Folders
+          </button>
+          <button
+            onClick={() => setShowRepoModal(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            <svg className="h-5 w-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            Import from Git Repos
+          </button>
+        </div>
+      </div>
 
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">Documents</h2>
-          <label className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer">
-            {uploading ? 'Uploading...' : 'Upload Document'}
-            <input
-              type="file"
-              className="hidden"
-              accept=".txt,.md,.json,.pdf"
-              onChange={handleFileUpload}
-              disabled={uploading}
-            />
-          </label>
+          <span className="text-gray-500 text-sm">
+            {documents.length} file{documents.length !== 1 ? 's' : ''}
+          </span>
         </div>
 
-        {documents.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <p>No documents uploaded yet</p>
-            <p className="text-sm mt-2">
-              Upload your technical documentation to get started
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {documents.map((doc) => (
-              <div
-                key={doc.id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-md"
-              >
-                <div>
-                  <p className="font-medium">{doc.filename}</p>
-                  <p className="text-sm text-gray-500">
-                    {(doc.size / 1024).toFixed(1)} KB • {doc.mimeType}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleDeleteDocument(doc.id)}
-                  className="text-red-600 hover:text-red-800 text-sm"
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <DocumentList
+          documents={documents}
+          onDeleteDocument={handleDeleteDocument}
+          onDeleteSource={handleDeleteSource}
+        />
       </div>
 
       {/* Placeholder for future features */}
@@ -159,6 +193,18 @@ function ProjectDetailPage() {
           Operation discovery and diagram generation features coming soon...
         </p>
       </div>
+
+      <FolderImportModal
+        isOpen={showFolderModal}
+        onClose={() => setShowFolderModal(false)}
+        onImport={handleFolderImport}
+      />
+
+      <RepoImportModal
+        isOpen={showRepoModal}
+        onClose={() => setShowRepoModal(false)}
+        onImport={handleRepoImport}
+      />
     </div>
   );
 }
