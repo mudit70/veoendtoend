@@ -1,4 +1,8 @@
-import type { Project, Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult } from '@veoendtoend/shared';
+import type { Project, Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult, Operation, Job } from '@veoendtoend/shared';
+
+export interface DiscoveryJob extends Job {
+  projectId: string;
+}
 
 const API_BASE_URL = '/api';
 
@@ -169,6 +173,76 @@ export const apiClient = {
   ): Promise<ApiResponse<{ message: string }>> {
     return request(`/documents/project/${projectId}/source/${encodeURIComponent(sourceName)}`, {
       method: 'DELETE',
+    });
+  },
+
+  // Discovery
+  async startDiscovery(projectId: string): Promise<ApiResponse<DiscoveryJob>> {
+    return request(`/projects/${projectId}/discover`, {
+      method: 'POST',
+    });
+  },
+
+  async getDiscoveryJob(jobId: string): Promise<ApiResponse<DiscoveryJob>> {
+    return request(`/discovery/jobs/${jobId}`);
+  },
+
+  async getLatestDiscoveryJob(projectId: string): Promise<ApiResponse<DiscoveryJob>> {
+    return request(`/projects/${projectId}/discovery/latest`);
+  },
+
+  // Operations
+  async getOperations(projectId: string, filters?: { status?: string; type?: string }): Promise<ApiResponse<Operation[]>> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.type) params.append('type', filters.type);
+    const queryString = params.toString();
+    return request(`/projects/${projectId}/operations${queryString ? `?${queryString}` : ''}`);
+  },
+
+  async getOperation(id: string): Promise<ApiResponse<Operation>> {
+    return request(`/operations/${id}`);
+  },
+
+  async createOperation(projectId: string, data: {
+    name: string;
+    description?: string;
+    type: Operation['type'];
+    sourceDocumentIds?: string[];
+  }): Promise<ApiResponse<Operation>> {
+    return request(`/projects/${projectId}/operations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateOperation(id: string, data: Partial<{
+    name: string;
+    description: string;
+    type: Operation['type'];
+    status: Operation['status'];
+  }>): Promise<ApiResponse<Operation>> {
+    return request(`/operations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteOperation(id: string): Promise<ApiResponse<void>> {
+    return request(`/operations/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async confirmOperation(id: string): Promise<ApiResponse<Operation>> {
+    return request(`/operations/${id}/confirm`, {
+      method: 'POST',
+    });
+  },
+
+  async rejectOperation(id: string): Promise<ApiResponse<Operation>> {
+    return request(`/operations/${id}/reject`, {
+      method: 'POST',
     });
   },
 };
