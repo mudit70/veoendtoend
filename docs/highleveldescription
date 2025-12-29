@@ -1,0 +1,18 @@
+This project does the following:
+a) discover client operations or user interactions and lists them.
+b) allows users of the system to correct the list.
+c) system offers a default template based on industry best practices for visually describing end to end flows for successfully completing client operations or user experiences. 
+d) users can modify the template and save their modifications as a new template.
+e) users specify the corpus that contains the information from where exact details regarding components of the template can be obtained.
+f) users can ask the system to discover details for specific client operations/user experiences and also for all of them.
+g) using the template, system draws one diagram per client operation or user experience with an apporpriate name and includes details of each component of the diagram based on information in the corpus.
+h) system indicates the sources of information for each component of the diagram visually on the component. 
+i) user is able to modify the diagram and save it for future use.
+j) user is able to regenerate a diagram and the system keeps the history of generation of the diagram and is able to show the differences between previous and current versions.
+k) user can ask the system to validate the correctness of a diagram where the system checks the corpus and reports any discrepencies between the diagram and the corpus.
+l) if relevant information about a component of the template is not found in the corpus that component remains greyed out and is considered a pass through for the end to end flow.
+m) administrators of the system can describe the template using natural language and the system renders the template visually and they can rate the template.
+n) administrators can use a natural language interface to modify the template once it is rendnered.
+o) administrators can modify the template in a multiuser visual teamplate editor.
+p) system remembers the prompts and user feedback on the template such that it can use this memory to generate a better template for a similar prompt next time.   
+  
