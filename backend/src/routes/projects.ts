@@ -19,22 +19,27 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
   };
 };
 
+// Helper to map database row to Project object
+function mapRowToProject(row: Record<string, unknown>): Project {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    description: row.description as string | undefined,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
 // GET /api/projects - List all projects
 router.get(
   '/',
   asyncHandler(async (_req: Request, res: Response) => {
     const db = getDatabase();
-    const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as Project[];
+    const rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as Record<string, unknown>[];
 
     const response: ApiResponse<Project[]> = {
       success: true,
-      data: projects.map((p) => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-      })),
+      data: rows.map(mapRowToProject),
     };
 
     res.json(response);
@@ -46,9 +51,9 @@ router.get(
   '/:id',
   asyncHandler(async (req: Request, res: Response) => {
     const db = getDatabase();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as Project | undefined;
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
 
-    if (!project) {
+    if (!row) {
       res.status(404).json({
         success: false,
         error: 'Project not found',
@@ -58,13 +63,7 @@ router.get(
 
     const response: ApiResponse<Project> = {
       success: true,
-      data: {
-        id: project.id,
-        name: project.name,
-        description: project.description,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-      },
+      data: mapRowToProject(row),
     };
 
     res.json(response);
@@ -95,17 +94,11 @@ router.post(
       VALUES (?, ?, ?, ?, ?)
     `).run(id, req.body.name, req.body.description || null, now, now);
 
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Project;
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Record<string, unknown>;
 
     const response: ApiResponse<Project> = {
       success: true,
-      data: {
-        id: project.id,
-        name: project.name,
-        description: project.description,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-      },
+      data: mapRowToProject(row),
     };
 
     res.status(201).json(response);
@@ -144,17 +137,11 @@ router.put(
       WHERE id = ?
     `).run(req.body.name, req.body.description || null, now, req.params.id);
 
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as Project;
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as Record<string, unknown>;
 
     const response: ApiResponse<Project> = {
       success: true,
-      data: {
-        id: project.id,
-        name: project.name,
-        description: project.description,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-      },
+      data: mapRowToProject(row),
     };
 
     res.json(response);
