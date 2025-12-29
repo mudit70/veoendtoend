@@ -3,7 +3,7 @@
 
 ### 1. MVP2 Goal
 
-Build on MVP1 (Operation Discovery) by adding the ability to generate visual end-to-end flow diagrams for discovered operations using a fixed template representing a typical web application architecture.
+Build on MVP1 (Operation Discovery) by adding the ability to generate, **edit**, and **save** visual end-to-end flow diagrams for discovered operations using a fixed template representing a typical web application architecture.
 
 **Prerequisites from MVP1:**
 - Document upload and text extraction
@@ -13,15 +13,16 @@ Build on MVP1 (Operation Discovery) by adding the ability to generate visual end
 **What's NEW in MVP2:**
 - Fixed template for web application flows
 - LLM-based detail extraction for each template component
-- Visual diagram rendering (SVG/Canvas)
+- **Interactive diagram rendering using ReactFlow library**
+- **User can modify diagram components (edit text, reposition nodes)**
+- **User can save modified diagrams for future use**
 - Source attribution on diagram components
-- Diagram export (PNG, SVG)
+- Diagram export (PNG, SVG, JSON)
 
 **What's OUT of scope for MVP2:**
 - Custom templates (fixed template only)
 - Template editor
-- Diagram editing/modification
-- Version history
+- Version history / diff view
 - Multi-user collaboration
 
 ---
@@ -93,8 +94,8 @@ The Security Layer is expanded to show:
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Frontend (React)                         │
 │  ┌─────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
-│  │  MVP1       │  │   Diagram       │  │   Diagram           │  │
-│  │  Components │  │   Canvas        │  │   Export            │  │
+│  │  MVP1       │  │   ReactFlow     │  │   Diagram           │  │
+│  │  Components │  │   Editor        │  │   Export            │  │
 │  └─────────────┘  └─────────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -103,7 +104,7 @@ The Security Layer is expanded to show:
 │                      Backend API (Node.js)                       │
 │  ┌─────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
 │  │  MVP1       │  │   Diagram       │  │   Detail            │  │
-│  │  Endpoints  │  │   Generation    │  │   Extraction        │  │
+│  │  Endpoints  │  │   CRUD + Save   │  │   Extraction        │  │
 │  └─────────────┘  └─────────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -133,6 +134,15 @@ CREATE TABLE diagrams (
     name TEXT NOT NULL,
     status TEXT DEFAULT 'PENDING'
         CHECK(status IN ('PENDING', 'GENERATING', 'COMPLETED', 'FAILED')),
+
+    -- User modification tracking
+    is_modified BOOLEAN DEFAULT FALSE,
+    last_saved_at TIMESTAMP,
+    last_saved_by TEXT,
+
+    -- ReactFlow state (stored as JSON)
+    viewport JSON,                   -- { x, y, zoom }
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     error_message TEXT
@@ -147,7 +157,7 @@ CREATE TABLE diagram_components (
     -- LOAD_BALANCER, API_GATEWAY, API_ENDPOINT, BACKEND_LOGIC,
     -- DATABASE, EVENT_HANDLER, VIEW_UPDATE
 
-    -- Content
+    -- Content (user-editable)
     title TEXT,
     description TEXT,
     details JSON,                    -- Flexible additional details
@@ -157,13 +167,32 @@ CREATE TABLE diagram_components (
         CHECK(status IN ('PENDING', 'POPULATED', 'GREYED_OUT', 'ERROR')),
     confidence REAL,
 
-    -- Source attribution
+    -- Source attribution (from LLM extraction)
     source_excerpt TEXT,
     source_document_id TEXT REFERENCES documents(id),
 
-    -- Position (for rendering)
-    position_x INTEGER,
-    position_y INTEGER,
+    -- ReactFlow node position (user-adjustable)
+    position_x REAL NOT NULL,
+    position_y REAL NOT NULL,
+
+    -- Track user modifications
+    is_user_modified BOOLEAN DEFAULT FALSE,
+    original_title TEXT,             -- Store original for reset
+    original_description TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Edges/connections between components
+CREATE TABLE diagram_edges (
+    id TEXT PRIMARY KEY,
+    diagram_id TEXT REFERENCES diagrams(id) ON DELETE CASCADE,
+    source_component_id TEXT REFERENCES diagram_components(id),
+    target_component_id TEXT REFERENCES diagram_components(id),
+    edge_type TEXT DEFAULT 'default',  -- 'default', 'animated', 'step'
+    label TEXT,
+    style JSON,                        -- Custom styling
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -181,11 +210,11 @@ CREATE TABLE diagram_jobs (
 );
 ```
 
-#### 4.2 Component Type Enum
+#### 4.2 TypeScript Types
 
 ```typescript
+// Component types
 enum ComponentType {
-  // Request Flow
   USER_ACTION = 'USER_ACTION',
   CLIENT_CODE = 'CLIENT_CODE',
   FIREWALL = 'FIREWALL',
@@ -195,12 +224,11 @@ enum ComponentType {
   API_ENDPOINT = 'API_ENDPOINT',
   BACKEND_LOGIC = 'BACKEND_LOGIC',
   DATABASE = 'DATABASE',
-
-  // Response Flow
   EVENT_HANDLER = 'EVENT_HANDLER',
   VIEW_UPDATE = 'VIEW_UPDATE'
 }
 
+// Diagram component (maps to ReactFlow node)
 interface DiagramComponent {
   id: string;
   diagramId: string;
@@ -213,12 +241,42 @@ interface DiagramComponent {
   sourceExcerpt?: string;
   sourceDocumentId?: string;
   position: { x: number; y: number };
+
+  // Modification tracking
+  isUserModified: boolean;
+  originalTitle?: string;
+  originalDescription?: string;
+}
+
+// Edge between components
+interface DiagramEdge {
+  id: string;
+  diagramId: string;
+  source: string;          // source component ID
+  target: string;          // target component ID
+  type?: string;
+  label?: string;
+  animated?: boolean;
+}
+
+// Full diagram state (for save/load)
+interface DiagramState {
+  diagram: {
+    id: string;
+    name: string;
+    operationId: string;
+    isModified: boolean;
+    lastSavedAt?: string;
+  };
+  components: DiagramComponent[];
+  edges: DiagramEdge[];
+  viewport: { x: number; y: number; zoom: number };
 }
 ```
 
 ---
 
-### 5. API Specification (New Endpoints)
+### 5. API Specification
 
 #### 5.1 Generate Diagram
 
@@ -255,7 +313,7 @@ Response:
 }
 ```
 
-#### 5.3 Get Diagram
+#### 5.3 Get Diagram (Full State for ReactFlow)
 
 ```
 GET /api/diagrams/:diagramId
@@ -267,11 +325,13 @@ Response:
     "name": "Add to Cart Flow",
     "operationId": "uuid",
     "status": "COMPLETED",
+    "isModified": false,
+    "lastSavedAt": null,
     "createdAt": "2024-01-15T10:30:00Z"
   },
   "components": [
     {
-      "id": "uuid",
+      "id": "node-user-action",
       "componentType": "USER_ACTION",
       "title": "Add to Cart Click",
       "description": "User clicks the 'Add to Cart' button on product page",
@@ -282,24 +342,87 @@ Response:
       "status": "POPULATED",
       "confidence": 0.89,
       "sourceExcerpt": "The add to cart button triggers...",
-      "position": { "x": 50, "y": 200 }
+      "position": { "x": 0, "y": 150 },
+      "isUserModified": false
     },
     // ... more components
-  ]
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "source": "node-user-action",
+      "target": "node-client-code",
+      "type": "smoothstep",
+      "animated": true
+    },
+    // ... more edges
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 1 }
 }
 ```
 
-#### 5.4 Export Diagram
+#### 5.4 Save Diagram (User Modifications)
+
+```
+PUT /api/diagrams/:diagramId
+
+Request:
+{
+  "components": [
+    {
+      "id": "node-user-action",
+      "title": "Click Add to Cart Button",      // User edited
+      "description": "Customer adds item to shopping cart",
+      "position": { "x": 50, "y": 150 }         // User repositioned
+    },
+    // ... only include modified components
+  ],
+  "edges": [
+    // ... if edges were modified
+  ],
+  "viewport": { "x": 100, "y": 50, "zoom": 0.8 }
+}
+
+Response:
+{
+  "success": true,
+  "diagram": {
+    "id": "uuid",
+    "isModified": true,
+    "lastSavedAt": "2024-01-15T11:30:00Z"
+  }
+}
+```
+
+#### 5.5 Reset Component to Original
+
+```
+POST /api/diagrams/:diagramId/components/:componentId/reset
+
+Response:
+{
+  "component": {
+    "id": "node-user-action",
+    "title": "Add to Cart Click",           // Restored to original
+    "description": "User clicks the 'Add to Cart' button on product page",
+    "isUserModified": false
+  }
+}
+```
+
+#### 5.6 Export Diagram
 
 ```
 POST /api/diagrams/:diagramId/export
 
 Request:
 {
-  "format": "png" | "svg",
+  "format": "png" | "svg" | "json",
   "options": {
     "width": 1920,
-    "includeSourceBadges": true
+    "height": 1080,
+    "includeSourceBadges": true,
+    "backgroundColor": "#ffffff"
   }
 }
 
@@ -310,7 +433,7 @@ Response:
 }
 ```
 
-#### 5.5 List Diagrams for Operation
+#### 5.7 List Diagrams for Operation
 
 ```
 GET /api/projects/:projectId/operations/:operationId/diagrams
@@ -322,6 +445,8 @@ Response:
       "id": "uuid",
       "name": "Add to Cart Flow",
       "status": "COMPLETED",
+      "isModified": true,
+      "lastSavedAt": "2024-01-15T11:30:00Z",
       "createdAt": "2024-01-15T10:30:00Z"
     }
   ]
@@ -331,6 +456,8 @@ Response:
 ---
 
 ### 6. Detail Extraction Engine
+
+*(Same as before - LLM-based extraction for each component)*
 
 #### 6.1 Extraction Flow
 
@@ -350,214 +477,7 @@ Response:
                          └────── Loop ───────────────┘
 ```
 
-#### 6.2 Component-Specific Prompts
-
-```typescript
-const COMPONENT_PROMPTS: Record<ComponentType, string> = {
-  USER_ACTION: `
-    For the operation "{operation_name}", identify the user action that triggers this flow.
-    Look for:
-    - What does the user do? (click, submit, navigate, etc.)
-    - What UI element do they interact with?
-    - What is the user's intent?
-
-    Return JSON:
-    {
-      "title": "Brief title (3-5 words)",
-      "description": "One sentence describing the user action",
-      "details": {
-        "trigger": "click|submit|navigate|input|...",
-        "element": "Description of UI element",
-        "userIntent": "What the user wants to achieve"
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-
-    If no information found, return:
-    { "status": "NOT_FOUND", "confidence": 0 }
-  `,
-
-  CLIENT_CODE: `
-    For the operation "{operation_name}", identify the client-side code that handles this action.
-    Look for:
-    - Function or method name
-    - Component or module name
-    - Framework used (React, Vue, Angular, etc.)
-    - What data is prepared for the API call
-
-    Return JSON:
-    {
-      "title": "Brief title (e.g., 'CartService.addItem')",
-      "description": "One sentence describing what the code does",
-      "details": {
-        "function": "Function/method name",
-        "component": "Component or module name",
-        "framework": "React|Vue|Angular|vanilla|...",
-        "dataPreparation": "What data is gathered/formatted"
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-  `,
-
-  API_ENDPOINT: `
-    For the operation "{operation_name}", identify the API endpoint called.
-    Look for:
-    - HTTP method (GET, POST, PUT, DELETE, etc.)
-    - URL path
-    - Request body structure
-    - Authentication required
-
-    Return JSON:
-    {
-      "title": "METHOD /path",
-      "description": "One sentence describing the endpoint purpose",
-      "details": {
-        "method": "GET|POST|PUT|DELETE|PATCH",
-        "path": "/api/v1/...",
-        "requestBody": "Description of request payload",
-        "authentication": "Bearer token|API key|Session|None",
-        "responseType": "JSON|XML|..."
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-  `,
-
-  BACKEND_LOGIC: `
-    For the operation "{operation_name}", identify the backend business logic.
-    Look for:
-    - Service or controller name
-    - Business rules applied
-    - Validations performed
-    - External services called
-
-    Return JSON:
-    {
-      "title": "Brief title (e.g., 'OrderService.processOrder')",
-      "description": "One sentence describing the business logic",
-      "details": {
-        "service": "Service/controller name",
-        "method": "Method name",
-        "businessRules": ["List of rules applied"],
-        "validations": ["List of validations"],
-        "externalCalls": ["Any external services called"]
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-  `,
-
-  DATABASE: `
-    For the operation "{operation_name}", identify database operations.
-    Look for:
-    - Tables accessed
-    - Type of operation (read/write)
-    - Query patterns
-    - Data relationships
-
-    Return JSON:
-    {
-      "title": "Brief title (e.g., 'Write to orders table')",
-      "description": "One sentence describing the database operation",
-      "details": {
-        "operation": "READ|WRITE|READ_WRITE",
-        "tables": ["List of tables"],
-        "queryType": "SELECT|INSERT|UPDATE|DELETE|...",
-        "relationships": "Any joins or related tables"
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-  `,
-
-  // Security components often have generic info
-  FIREWALL: `
-    For the operation "{operation_name}", identify any firewall configuration or rules mentioned.
-    If no specific information, return general acknowledgment.
-
-    Return JSON:
-    {
-      "title": "Network Firewall",
-      "description": "Description or 'Standard network firewall protection'",
-      "details": {
-        "rules": ["Any specific rules mentioned"],
-        "ports": ["Ports if mentioned"]
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote if available"
-    }
-  `,
-
-  WAF: `
-    For the operation "{operation_name}", identify Web Application Firewall details.
-    Look for: WAF rules, security policies, OWASP protections.
-
-    Return JSON with title, description, details, confidence, sourceExcerpt.
-  `,
-
-  LOAD_BALANCER: `
-    For the operation "{operation_name}", identify load balancer configuration.
-    Look for: Load balancing strategy, health checks, routing rules.
-
-    Return JSON with title, description, details, confidence, sourceExcerpt.
-  `,
-
-  API_GATEWAY: `
-    For the operation "{operation_name}", identify API gateway details.
-    Look for: Rate limiting, authentication, request transformation, routing.
-
-    Return JSON with title, description, details, confidence, sourceExcerpt.
-  `,
-
-  EVENT_HANDLER: `
-    For the operation "{operation_name}", identify how the client handles the response.
-    Look for:
-    - Callback or promise handler
-    - State updates
-    - Error handling
-
-    Return JSON:
-    {
-      "title": "Brief title (e.g., 'onSuccess callback')",
-      "description": "One sentence describing response handling",
-      "details": {
-        "handler": "Function/callback name",
-        "stateUpdates": ["What state is updated"],
-        "errorHandling": "How errors are handled"
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-  `,
-
-  VIEW_UPDATE: `
-    For the operation "{operation_name}", identify how the UI updates after the operation.
-    Look for:
-    - Visual changes
-    - User feedback (notifications, messages)
-    - Navigation changes
-
-    Return JSON:
-    {
-      "title": "Brief title (e.g., 'Cart badge updates')",
-      "description": "One sentence describing the UI update",
-      "details": {
-        "visualChanges": ["List of UI changes"],
-        "userFeedback": "Toast/notification/message shown",
-        "navigation": "Any navigation that occurs"
-      },
-      "confidence": 0.0-1.0,
-      "sourceExcerpt": "Quote from documentation"
-    }
-  `
-};
-```
-
-#### 6.3 Master Extraction Prompt
-
-For efficiency, we can also do a single extraction call:
+#### 6.2 Master Extraction Prompt
 
 ```typescript
 const FULL_EXTRACTION_PROMPT = `
@@ -604,405 +524,533 @@ Mark "found": false for components with no relevant information in the corpus.
 `;
 ```
 
-#### 6.4 Extraction Service Implementation
+---
+
+### 7. ReactFlow Integration
+
+#### 7.1 Why ReactFlow?
+
+| Feature | ReactFlow | Mermaid |
+|---------|-----------|---------|
+| Interactive editing | ✅ Built-in | ❌ Read-only |
+| Drag & drop nodes | ✅ Native | ❌ No |
+| Custom node components | ✅ Full React | ⚠️ Limited |
+| Zoom & pan | ✅ Built-in | ⚠️ Basic |
+| Edge manipulation | ✅ Yes | ❌ No |
+| Export to image | ✅ With library | ✅ Built-in |
+| Learning curve | Medium | Low |
+
+**Decision:** Use **ReactFlow** for MVP2 to enable interactive editing. Mermaid could be offered as a "simple view" alternative.
+
+#### 7.2 ReactFlow Node Types
 
 ```typescript
-interface ExtractionResult {
-  componentType: ComponentType;
-  found: boolean;
+// Custom node types for our template components
+const nodeTypes = {
+  userAction: UserActionNode,
+  clientCode: ClientCodeNode,
+  securityComponent: SecurityComponentNode,
+  apiEndpoint: ApiEndpointNode,
+  backendLogic: BackendLogicNode,
+  database: DatabaseNode,
+  eventHandler: EventHandlerNode,
+  viewUpdate: ViewUpdateNode,
+  securityGroup: SecurityGroupNode,  // Container for security layer
+};
+```
+
+#### 7.3 Custom Node Component
+
+```tsx
+// components/nodes/BaseNode.tsx
+import { memo } from 'react';
+import { Handle, Position, NodeProps } from 'reactflow';
+
+interface ComponentNodeData {
   title: string;
   description: string;
   details: Record<string, any>;
+  status: 'POPULATED' | 'GREYED_OUT' | 'ERROR';
   confidence: number;
   sourceExcerpt?: string;
+  isUserModified: boolean;
+  onEdit: (id: string) => void;
 }
 
-async function extractDiagramDetails(
-  operation: Operation,
-  documents: Document[]
-): Promise<ExtractionResult[]> {
-
-  // Combine all document content
-  const corpusContent = documents
-    .map(d => `## ${d.filename}\n${d.content}`)
-    .join('\n\n---\n\n');
-
-  // Build the prompt
-  const prompt = FULL_EXTRACTION_PROMPT
-    .replace('{operation_name}', operation.name)
-    .replace('{operation_description}', operation.description)
-    .replace('{corpus_content}', corpusContent);
-
-  // Call LLM
-  const response = await anthropic.messages.create({
-    model: 'claude-3-haiku-20240307',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: prompt }]
-  });
-
-  // Parse response
-  const extracted = JSON.parse(response.content[0].text);
-
-  // Convert to array of results
-  const results: ExtractionResult[] = [];
-  for (const componentType of Object.values(ComponentType)) {
-    const data = extracted[componentType];
-    results.push({
-      componentType,
-      found: data?.found ?? false,
-      title: data?.title ?? getDefaultTitle(componentType),
-      description: data?.description ?? getDefaultDescription(componentType),
-      details: data?.details ?? {},
-      confidence: data?.confidence ?? 0,
-      sourceExcerpt: data?.sourceExcerpt
-    });
-  }
-
-  return results;
-}
-
-function getDefaultTitle(type: ComponentType): string {
-  const defaults: Record<ComponentType, string> = {
-    USER_ACTION: 'User Action',
-    CLIENT_CODE: 'Client Handler',
-    FIREWALL: 'Network Firewall',
-    WAF: 'Web Application Firewall',
-    LOAD_BALANCER: 'Load Balancer',
-    API_GATEWAY: 'API Gateway',
-    API_ENDPOINT: 'API Endpoint',
-    BACKEND_LOGIC: 'Backend Service',
-    DATABASE: 'Database',
-    EVENT_HANDLER: 'Response Handler',
-    VIEW_UPDATE: 'View Update'
+export const BaseNode = memo(({ id, data, selected }: NodeProps<ComponentNodeData>) => {
+  const statusColors = {
+    POPULATED: '#4CAF50',
+    GREYED_OUT: '#9E9E9E',
+    ERROR: '#F44336',
   };
-  return defaults[type];
-}
 
-function getDefaultDescription(type: ComponentType): string {
-  const defaults: Record<ComponentType, string> = {
-    USER_ACTION: 'User initiates the operation',
-    CLIENT_CODE: 'Client-side code processes the action',
-    FIREWALL: 'Network-level security filtering',
-    WAF: 'Application-layer security protection',
-    LOAD_BALANCER: 'Distributes traffic across servers',
-    API_GATEWAY: 'Routes and manages API requests',
-    API_ENDPOINT: 'Backend API receives request',
-    BACKEND_LOGIC: 'Business logic processes request',
-    DATABASE: 'Data persistence layer',
-    EVENT_HANDLER: 'Handles API response',
-    VIEW_UPDATE: 'UI reflects the result'
-  };
-  return defaults[type];
-}
+  return (
+    <div
+      className={`component-node ${selected ? 'selected' : ''} ${data.status.toLowerCase()}`}
+      style={{
+        borderColor: statusColors[data.status],
+        opacity: data.status === 'GREYED_OUT' ? 0.6 : 1,
+      }}
+    >
+      {/* Input handle */}
+      <Handle type="target" position={Position.Left} />
+
+      {/* Header */}
+      <div className="node-header">
+        <span className="node-title">{data.title}</span>
+        {data.isUserModified && <span className="modified-badge">✎</span>}
+      </div>
+
+      {/* Description */}
+      <div className="node-description">
+        {data.description}
+      </div>
+
+      {/* Footer */}
+      <div className="node-footer">
+        {data.status === 'POPULATED' && (
+          <span className="confidence">{Math.round(data.confidence * 100)}%</span>
+        )}
+        {data.sourceExcerpt && (
+          <span className="source-badge" title={data.sourceExcerpt}>📎</span>
+        )}
+        <button className="edit-btn" onClick={() => data.onEdit(id)}>✏️</button>
+      </div>
+
+      {/* Output handle */}
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+});
 ```
 
----
-
-### 7. Diagram Rendering
-
-#### 7.1 Layout Configuration
-
-```typescript
-const LAYOUT_CONFIG = {
-  canvas: {
-    width: 1400,
-    height: 600,
-    padding: 40
-  },
-
-  component: {
-    width: 140,
-    height: 80,
-    gap: 30
-  },
-
-  securityLayer: {
-    subComponentWidth: 100,
-    subComponentHeight: 50,
-    gap: 15
-  },
-
-  colors: {
-    populated: '#4CAF50',      // Green - has data
-    greyedOut: '#9E9E9E',      // Grey - no data
-    error: '#F44336',          // Red - extraction failed
-    pending: '#FFC107',        // Yellow - processing
-
-    // Component type colors
-    userAction: '#2196F3',     // Blue
-    clientCode: '#673AB7',     // Purple
-    security: '#FF9800',       // Orange
-    backend: '#009688',        // Teal
-    database: '#795548',       // Brown
-    response: '#E91E63'        // Pink
-  },
-
-  arrows: {
-    strokeWidth: 2,
-    headSize: 8,
-    requestColor: '#333',
-    responseColor: '#666'
-  }
-};
-```
-
-#### 7.2 Component Positions
-
-```typescript
-const COMPONENT_POSITIONS: Record<ComponentType, { x: number; y: number; row: 'main' | 'security' | 'response' }> = {
-  USER_ACTION:    { x: 0,   y: 0, row: 'main' },
-  CLIENT_CODE:    { x: 1,   y: 0, row: 'main' },
-  // Security layer components
-  FIREWALL:       { x: 0,   y: 0, row: 'security' },
-  WAF:            { x: 1,   y: 0, row: 'security' },
-  LOAD_BALANCER:  { x: 2,   y: 0, row: 'security' },
-  API_GATEWAY:    { x: 3,   y: 0, row: 'security' },
-  // Continue main flow
-  API_ENDPOINT:   { x: 3,   y: 0, row: 'main' },
-  BACKEND_LOGIC:  { x: 4,   y: 0, row: 'main' },
-  DATABASE:       { x: 5,   y: 0, row: 'main' },
-  // Response flow
-  EVENT_HANDLER:  { x: 1,   y: 0, row: 'response' },
-  VIEW_UPDATE:    { x: 0,   y: 0, row: 'response' }
-};
-```
-
-#### 7.3 Rendering with React + SVG
+#### 7.4 Security Layer Group Node
 
 ```tsx
-// DiagramCanvas.tsx
-import React from 'react';
-import { DiagramComponent, LAYOUT_CONFIG } from './types';
+// components/nodes/SecurityGroupNode.tsx
+import { memo } from 'react';
+import { Handle, Position, NodeProps } from 'reactflow';
 
-interface DiagramCanvasProps {
-  components: DiagramComponent[];
-  diagramName: string;
+export const SecurityGroupNode = memo(({ data }: NodeProps) => {
+  return (
+    <div className="security-group-node">
+      <Handle type="target" position={Position.Left} />
+
+      <div className="group-label">Security Layer</div>
+
+      <div className="security-components">
+        {data.components.map((comp: any) => (
+          <div
+            key={comp.id}
+            className={`security-sub-node ${comp.status.toLowerCase()}`}
+          >
+            <div className="sub-title">{comp.title}</div>
+            <div className="sub-desc">{comp.description}</div>
+          </div>
+        ))}
+      </div>
+
+      <Handle type="source" position={Position.Right} />
+    </div>
+  );
+});
+```
+
+#### 7.5 Main Diagram Editor Component
+
+```tsx
+// components/DiagramEditor.tsx
+import { useCallback, useState, useEffect } from 'react';
+import ReactFlow, {
+  Node,
+  Edge,
+  Controls,
+  Background,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Connection,
+  NodeChange,
+  EdgeChange,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+
+import { nodeTypes } from './nodes';
+import { EditModal } from './EditModal';
+import { DiagramToolbar } from './DiagramToolbar';
+import { transformToReactFlow, transformFromReactFlow } from '../utils/diagramTransform';
+
+interface DiagramEditorProps {
+  diagramId: string;
+  initialData: DiagramState;
+  onSave: (state: DiagramState) => Promise<void>;
 }
 
-export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
-  components,
-  diagramName
-}) => {
-  const { canvas, component, colors } = LAYOUT_CONFIG;
+export function DiagramEditor({ diagramId, initialData, onSave }: DiagramEditorProps) {
+  // Transform API data to ReactFlow format
+  const { initialNodes, initialEdges } = transformToReactFlow(initialData);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [viewport, setViewport] = useState(initialData.viewport);
+
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [editingNode, setEditingNode] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Track changes
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    onNodesChange(changes);
+    setHasUnsavedChanges(true);
+  }, [onNodesChange]);
+
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    onEdgesChange(changes);
+    setHasUnsavedChanges(true);
+  }, [onEdgesChange]);
+
+  // Open edit modal
+  const handleEditNode = useCallback((nodeId: string) => {
+    setEditingNode(nodeId);
+  }, []);
+
+  // Save node edits
+  const handleSaveNodeEdit = useCallback((nodeId: string, updates: Partial<ComponentNodeData>) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              ...updates,
+              isUserModified: true,
+            },
+          };
+        }
+        return node;
+      })
+    );
+    setEditingNode(null);
+    setHasUnsavedChanges(true);
+  }, [setNodes]);
+
+  // Save diagram
+  const handleSave = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      const state = transformFromReactFlow(diagramId, nodes, edges, viewport);
+      await onSave(state);
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      console.error('Save failed:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [diagramId, nodes, edges, viewport, onSave]);
+
+  // Keyboard shortcut for save
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSave]);
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   return (
-    <svg
-      width={canvas.width}
-      height={canvas.height}
-      className="diagram-canvas"
-    >
-      {/* Background */}
-      <rect width="100%" height="100%" fill="#fafafa" />
-
-      {/* Title */}
-      <text x={canvas.padding} y={30} className="diagram-title">
-        {diagramName}
-      </text>
-
-      {/* Main Flow Row */}
-      <g transform={`translate(${canvas.padding}, 80)`}>
-        <FlowRow
-          components={components.filter(c =>
-            ['USER_ACTION', 'CLIENT_CODE', 'API_ENDPOINT', 'BACKEND_LOGIC', 'DATABASE']
-              .includes(c.componentType)
-          )}
-        />
-      </g>
-
-      {/* Security Layer (expanded) */}
-      <g transform={`translate(${canvas.padding + 280}, 180)`}>
-        <SecurityLayer
-          components={components.filter(c =>
-            ['FIREWALL', 'WAF', 'LOAD_BALANCER', 'API_GATEWAY']
-              .includes(c.componentType)
-          )}
-        />
-      </g>
-
-      {/* Response Flow Row */}
-      <g transform={`translate(${canvas.padding}, 380)`}>
-        <FlowRow
-          components={components.filter(c =>
-            ['EVENT_HANDLER', 'VIEW_UPDATE'].includes(c.componentType)
-          )}
-          isResponseFlow
-        />
-      </g>
-
-      {/* Connection Arrows */}
-      <ConnectionArrows components={components} />
-    </svg>
-  );
-};
-
-const ComponentBox: React.FC<{ component: DiagramComponent }> = ({ component }) => {
-  const { width, height } = LAYOUT_CONFIG.component;
-  const statusColor = getStatusColor(component.status);
-
-  return (
-    <g className="component-box">
-      {/* Box */}
-      <rect
-        width={width}
-        height={height}
-        rx={8}
-        fill="white"
-        stroke={statusColor}
-        strokeWidth={2}
+    <div className="diagram-editor">
+      <DiagramToolbar
+        onSave={handleSave}
+        isSaving={isSaving}
+        hasUnsavedChanges={hasUnsavedChanges}
+        onExport={() => {/* TODO */}}
+        onResetAll={() => {/* TODO */}}
       />
 
-      {/* Title */}
-      <text x={width/2} y={25} textAnchor="middle" className="component-title">
-        {component.title}
-      </text>
+      <div className="reactflow-wrapper">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onMove={(_, viewport) => setViewport(viewport)}
+          nodeTypes={nodeTypes}
+          fitView
+          attributionPosition="bottom-left"
+        >
+          <Controls />
+          <MiniMap />
+          <Background gap={20} size={1} />
+        </ReactFlow>
+      </div>
 
-      {/* Description (truncated) */}
-      <text x={width/2} y={45} textAnchor="middle" className="component-desc">
-        {truncate(component.description, 25)}
-      </text>
-
-      {/* Confidence indicator */}
-      {component.status === 'POPULATED' && (
-        <ConfidenceBadge confidence={component.confidence} x={width - 30} y={height - 20} />
-      )}
-
-      {/* Source indicator */}
-      {component.sourceExcerpt && (
-        <SourceBadge x={10} y={height - 20} />
-      )}
-
-      {/* Greyed out overlay */}
-      {component.status === 'GREYED_OUT' && (
-        <rect
-          width={width}
-          height={height}
-          rx={8}
-          fill="rgba(158, 158, 158, 0.3)"
+      {editingNode && (
+        <EditModal
+          node={nodes.find((n) => n.id === editingNode)!}
+          onSave={(updates) => handleSaveNodeEdit(editingNode, updates)}
+          onCancel={() => setEditingNode(null)}
+          onReset={() => {/* TODO: Reset to original */}}
         />
       )}
-    </g>
+    </div>
   );
-};
+}
+```
 
-const SecurityLayer: React.FC<{ components: DiagramComponent[] }> = ({ components }) => {
-  const { subComponentWidth, subComponentHeight, gap } = LAYOUT_CONFIG.securityLayer;
+#### 7.6 Edit Modal Component
+
+```tsx
+// components/EditModal.tsx
+import { useState } from 'react';
+import { Node } from 'reactflow';
+
+interface EditModalProps {
+  node: Node;
+  onSave: (updates: { title: string; description: string }) => void;
+  onCancel: () => void;
+  onReset: () => void;
+}
+
+export function EditModal({ node, onSave, onCancel, onReset }: EditModalProps) {
+  const [title, setTitle] = useState(node.data.title);
+  const [description, setDescription] = useState(node.data.description);
 
   return (
-    <g className="security-layer">
-      {/* Container */}
-      <rect
-        width={4 * subComponentWidth + 3 * gap + 40}
-        height={subComponentHeight + 60}
-        rx={12}
-        fill="#FFF3E0"
-        stroke="#FF9800"
-        strokeWidth={1}
-      />
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h3>Edit Component</h3>
 
-      {/* Label */}
-      <text x={20} y={25} className="layer-label">Security Layer</text>
+        <div className="form-group">
+          <label>Title</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
 
-      {/* Sub-components */}
-      {components.map((comp, i) => (
-        <g key={comp.id} transform={`translate(${20 + i * (subComponentWidth + gap)}, 35)`}>
-          <SecuritySubComponent component={comp} />
-        </g>
-      ))}
-    </g>
+        <div className="form-group">
+          <label>Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+          />
+        </div>
+
+        {node.data.sourceExcerpt && (
+          <div className="source-info">
+            <strong>Source:</strong>
+            <p>{node.data.sourceExcerpt}</p>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          {node.data.isUserModified && (
+            <button className="btn-reset" onClick={onReset}>
+              Reset to Original
+            </button>
+          )}
+          <button className="btn-cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className="btn-save"
+            onClick={() => onSave({ title, description })}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
   );
+}
+```
+
+#### 7.7 Diagram Layout (Initial Positions)
+
+```typescript
+// utils/layoutConfig.ts
+
+// Initial positions for the fixed template
+export const INITIAL_LAYOUT = {
+  // Main request flow (top row)
+  USER_ACTION:    { x: 0,    y: 0 },
+  CLIENT_CODE:    { x: 250,  y: 0 },
+
+  // Security layer (middle, grouped)
+  SECURITY_GROUP: { x: 500,  y: -50 },  // Group container
+  FIREWALL:       { x: 520,  y: 20 },   // Inside group
+  WAF:            { x: 640,  y: 20 },
+  LOAD_BALANCER:  { x: 760,  y: 20 },
+  API_GATEWAY:    { x: 880,  y: 20 },
+
+  // Continue main flow
+  API_ENDPOINT:   { x: 1050, y: 0 },
+  BACKEND_LOGIC:  { x: 1300, y: 0 },
+  DATABASE:       { x: 1550, y: 0 },
+
+  // Response flow (bottom row)
+  EVENT_HANDLER:  { x: 250,  y: 250 },
+  VIEW_UPDATE:    { x: 0,    y: 250 },
 };
-```
 
-#### 7.4 Visual Design
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  Add to Cart Flow                                                                                               │
-├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                                                  │
-│   ┌─────────────┐      ┌─────────────┐                    ┌─────────────┐      ┌─────────────┐      ┌─────────┐│
-│   │ 🟢 Add to   │ ───▶ │ 🟢 Cart     │ ─────────────────▶ │ 🟢 POST     │ ───▶ │ 🟢 Cart     │ ───▶ │ 🟢 Write││
-│   │ Cart Click  │      │ Component   │                    │ /api/cart   │      │ Service     │      │ cart_   ││
-│   │             │      │             │                    │             │      │             │      │ items   ││
-│   │ 92%   📎    │      │ 88%   📎    │                    │ 95%   📎    │      │ 85%   📎    │      │ 78%  📎 ││
-│   └─────────────┘      └─────────────┘                    └─────────────┘      └─────────────┘      └─────────┘│
-│                              │                                   ▲                                       │      │
-│                              │                                   │                                       │      │
-│                              ▼                                   │                                       │      │
-│                    ┌─────────────────────────────────────────────────────────────────┐                   │      │
-│                    │  Security Layer                                                  │                   │      │
-│                    │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │                   │      │
-│                    │  │ ⚪ Fire- │─▶│ ⚪ WAF   │─▶│ ⚪ Load  │─▶│ ⚪ API   │        │                   │      │
-│                    │  │   wall   │  │          │  │ Balancer │  │ Gateway  │        │                   │      │
-│                    │  │  0%      │  │  0%      │  │  0%      │  │  0%      │        │                   │      │
-│                    │  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │                   │      │
-│                    └─────────────────────────────────────────────────────────────────┘                   │      │
-│                                                                                                           │      │
-│                              ┌─────────────────────────────────────────────────────────────────────────────┘      │
-│                              │                                                                                    │
-│                              ▼                                                                                    │
-│   ┌─────────────┐      ┌─────────────┐                                                                           │
-│   │ 🟢 Cart     │ ◀─── │ 🟢 onCart   │ ◀──────────────────────────────────────────────────────────────           │
-│   │ Badge       │      │ Updated     │                                                                           │
-│   │ Updates     │      │ Callback    │                                                                           │
-│   │ 90%   📎    │      │ 82%   📎    │                                                                           │
-│   └─────────────┘      └─────────────┘                                                                           │
-│                                                                                                                  │
-│   Legend:  🟢 Populated (data found)   ⚪ Greyed Out (no data)   📎 Has source reference                        │
-│                                                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+// Edge definitions (fixed connections)
+export const TEMPLATE_EDGES = [
+  { source: 'USER_ACTION', target: 'CLIENT_CODE' },
+  { source: 'CLIENT_CODE', target: 'SECURITY_GROUP' },
+  { source: 'SECURITY_GROUP', target: 'API_ENDPOINT' },
+  { source: 'API_ENDPOINT', target: 'BACKEND_LOGIC' },
+  { source: 'BACKEND_LOGIC', target: 'DATABASE' },
+  { source: 'DATABASE', target: 'BACKEND_LOGIC', type: 'response' },
+  { source: 'BACKEND_LOGIC', target: 'API_ENDPOINT', type: 'response' },
+  { source: 'API_ENDPOINT', target: 'SECURITY_GROUP', type: 'response' },
+  { source: 'SECURITY_GROUP', target: 'EVENT_HANDLER', type: 'response' },
+  { source: 'EVENT_HANDLER', target: 'VIEW_UPDATE' },
+];
 ```
 
 ---
 
 ### 8. Export Functionality
 
-#### 8.1 SVG Export
+#### 8.1 Export Options
+
+| Format | Use Case | Implementation |
+|--------|----------|----------------|
+| PNG | Presentations, docs | ReactFlow's `toImage()` or html-to-image |
+| SVG | Scalable graphics | ReactFlow's `toSVG()` |
+| JSON | Backup, reimport | Direct state serialization |
+
+#### 8.2 Export Implementation
 
 ```typescript
-async function exportAsSVG(diagramId: string): Promise<string> {
-  const diagram = await getDiagram(diagramId);
-  const svgContent = renderDiagramToSVG(diagram);
+// utils/exportDiagram.ts
+import { toPng, toSvg } from 'html-to-image';
+import { getNodesBounds, getViewportForBounds } from 'reactflow';
 
-  // Add XML declaration and styling
-  return `<?xml version="1.0" encoding="UTF-8"?>
-    ${svgContent}`;
-}
-```
+export async function exportToPng(
+  flowElement: HTMLElement,
+  nodes: Node[],
+  options: { width?: number; backgroundColor?: string } = {}
+): Promise<string> {
+  const { width = 1920, backgroundColor = '#ffffff' } = options;
 
-#### 8.2 PNG Export (using Puppeteer or Sharp)
+  const nodesBounds = getNodesBounds(nodes);
+  const viewport = getViewportForBounds(
+    nodesBounds,
+    width,
+    width * 0.6,
+    0.5,
+    2
+  );
 
-```typescript
-import puppeteer from 'puppeteer';
-
-async function exportAsPNG(diagramId: string, width: number = 1920): Promise<Buffer> {
-  const svgContent = await exportAsSVG(diagramId);
-
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-
-  await page.setContent(`
-    <!DOCTYPE html>
-    <html>
-      <body style="margin:0;padding:0;">
-        ${svgContent}
-      </body>
-    </html>
-  `);
-
-  const screenshot = await page.screenshot({
-    type: 'png',
-    fullPage: true
+  return toPng(flowElement, {
+    backgroundColor,
+    width,
+    height: width * 0.6,
+    style: {
+      transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+    },
   });
+}
 
-  await browser.close();
-  return screenshot;
+export async function exportToSvg(flowElement: HTMLElement): Promise<string> {
+  return toSvg(flowElement);
+}
+
+export function exportToJson(state: DiagramState): string {
+  return JSON.stringify(state, null, 2);
 }
 ```
 
 ---
 
-### 9. Frontend Components (New)
+### 9. Mermaid Alternative (Optional Simple View)
+
+For users who prefer a simpler, non-interactive view, offer Mermaid rendering:
+
+```typescript
+// utils/generateMermaid.ts
+
+export function generateMermaidDiagram(components: DiagramComponent[]): string {
+  const getLabel = (comp: DiagramComponent) =>
+    `${comp.title}<br/><small>${comp.description.slice(0, 30)}...</small>`;
+
+  return `
+flowchart LR
+    subgraph Client
+        UA[${getLabel(components.find(c => c.componentType === 'USER_ACTION')!)}]
+        CC[${getLabel(components.find(c => c.componentType === 'CLIENT_CODE')!)}]
+    end
+
+    subgraph Security Layer
+        FW[Firewall]
+        WAF[WAF]
+        LB[Load Balancer]
+        GW[API Gateway]
+    end
+
+    subgraph Backend
+        API[${getLabel(components.find(c => c.componentType === 'API_ENDPOINT')!)}]
+        BL[${getLabel(components.find(c => c.componentType === 'BACKEND_LOGIC')!)}]
+        DB[(${getLabel(components.find(c => c.componentType === 'DATABASE')!)})]
+    end
+
+    subgraph Response
+        EH[${getLabel(components.find(c => c.componentType === 'EVENT_HANDLER')!)}]
+        VU[${getLabel(components.find(c => c.componentType === 'VIEW_UPDATE')!)}]
+    end
+
+    UA --> CC --> FW --> WAF --> LB --> GW --> API --> BL --> DB
+    DB -.-> BL -.-> API -.-> GW -.-> EH --> VU
+
+    classDef populated fill:#4CAF50,color:#fff
+    classDef greyedOut fill:#9E9E9E,color:#fff
+  `;
+}
+```
+
+Usage:
+```tsx
+import mermaid from 'mermaid';
+
+function MermaidView({ components }: { components: DiagramComponent[] }) {
+  const diagram = generateMermaidDiagram(components);
+
+  useEffect(() => {
+    mermaid.initialize({ startOnLoad: true });
+    mermaid.contentLoaded();
+  }, [diagram]);
+
+  return (
+    <div className="mermaid">
+      {diagram}
+    </div>
+  );
+}
+```
+
+---
+
+### 10. Frontend Components Structure
 
 ```
 src/
@@ -1010,24 +1058,46 @@ src/
 │   ├── ... (MVP1 components)
 │   │
 │   ├── diagram/
-│   │   ├── DiagramCanvas.tsx       # Main SVG canvas
-│   │   ├── ComponentBox.tsx        # Single component rendering
-│   │   ├── SecurityLayer.tsx       # Security layer group
-│   │   ├── ConnectionArrows.tsx    # Arrows between components
-│   │   ├── ConfidenceBadge.tsx     # Confidence indicator
-│   │   ├── SourceBadge.tsx         # Source attribution indicator
-│   │   ├── ComponentTooltip.tsx    # Hover details
-│   │   └── Legend.tsx              # Diagram legend
+│   │   ├── DiagramEditor.tsx       # Main ReactFlow wrapper
+│   │   ├── DiagramToolbar.tsx      # Save, export, reset buttons
+│   │   ├── DiagramViewer.tsx       # Full page view
+│   │   ├── EditModal.tsx           # Component edit popup
+│   │   ├── MermaidView.tsx         # Optional simple view
+│   │   │
+│   │   ├── nodes/
+│   │   │   ├── index.ts            # Node type exports
+│   │   │   ├── BaseNode.tsx        # Base node component
+│   │   │   ├── UserActionNode.tsx
+│   │   │   ├── ClientCodeNode.tsx
+│   │   │   ├── SecurityGroupNode.tsx
+│   │   │   ├── ApiEndpointNode.tsx
+│   │   │   ├── BackendLogicNode.tsx
+│   │   │   ├── DatabaseNode.tsx
+│   │   │   ├── EventHandlerNode.tsx
+│   │   │   └── ViewUpdateNode.tsx
+│   │   │
+│   │   └── edges/
+│   │       ├── RequestEdge.tsx     # Solid arrow for request
+│   │       └── ResponseEdge.tsx    # Dashed arrow for response
 │   │
-│   ├── DiagramGenerateButton.tsx   # Trigger generation
-│   ├── DiagramStatus.tsx           # Generation progress
-│   ├── DiagramViewer.tsx           # Full diagram view page
-│   └── DiagramExport.tsx           # Export options
+│   ├── DiagramGenerateButton.tsx
+│   ├── DiagramStatus.tsx
+│   └── DiagramExportMenu.tsx
+│
+├── utils/
+│   ├── diagramTransform.ts         # API ↔ ReactFlow conversion
+│   ├── layoutConfig.ts             # Initial positions
+│   ├── exportDiagram.ts            # Export functions
+│   └── generateMermaid.ts          # Mermaid generation
+│
+└── hooks/
+    ├── useDiagram.ts               # Fetch/save diagram
+    └── useAutoSave.ts              # Optional auto-save
 ```
 
 ---
 
-### 10. User Flow
+### 11. User Flow (Updated)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -1041,72 +1111,121 @@ MVP1 Flow (unchanged):
 └──────────┘     └──────────┘     └──────────┘     └──────────┘
                                                          │
                                                          ▼
-MVP2 Addition:                              ┌──────────────────────┐
-                                            │ Select an operation  │
-                                            └──────────┬───────────┘
-                                                       │
-                                                       ▼
-                                            ┌──────────────────────┐
-                                            │ [Generate Diagram]   │
-                                            └──────────┬───────────┘
-                                                       │
-                                                       ▼
-                                            ┌──────────────────────┐
-                                            │ View progress:       │
-                                            │ "Extracting API..."  │
-                                            └──────────┬───────────┘
-                                                       │
-                                                       ▼
-                                            ┌──────────────────────┐
-                                            │ View diagram         │
-                                            │ - See populated      │
-                                            │   components         │
-                                            │ - See greyed out     │
-                                            │   (no data found)    │
-                                            │ - Hover for details  │
-                                            │ - Click 📎 for source│
-                                            └──────────┬───────────┘
-                                                       │
-                                                       ▼
-                                            ┌──────────────────────┐
-                                            │ [Export PNG] [SVG]   │
-                                            └──────────────────────┘
+MVP2 Flow:                                   ┌──────────────────────┐
+                                             │ Select an operation  │
+                                             └──────────┬───────────┘
+                                                        │
+                                                        ▼
+                                             ┌──────────────────────┐
+                                             │ [Generate Diagram]   │
+                                             └──────────┬───────────┘
+                                                        │
+                                                        ▼
+                                             ┌──────────────────────┐
+                                             │ View progress:       │
+                                             │ "Extracting API..."  │
+                                             └──────────┬───────────┘
+                                                        │
+                                                        ▼
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                        INTERACTIVE DIAGRAM EDITOR                               │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  [💾 Save] [↩️ Reset] [📤 Export ▼]                    Unsaved changes: ●       │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                          │   │
+│  │   ┌─────────┐      ┌─────────┐      ┌──────────────────┐                │   │
+│  │   │ Add to  │ ───▶ │ Cart    │ ───▶ │  Security Layer  │ ───▶ ...      │   │
+│  │   │ Cart    │      │ Handler │      │  ┌────┐ ┌────┐   │                │   │
+│  │   │ Click   │      │         │      │  │ FW │→│WAF │→..│                │   │
+│  │   │   ✎     │      │         │      │  └────┘ └────┘   │                │   │
+│  │   └─────────┘      └─────────┘      └──────────────────┘                │   │
+│  │        │                                                                 │   │
+│  │        │  ◀─── Drag to reposition                                        │   │
+│  │        │                                                                 │   │
+│  │   ┌─────────┐      ┌─────────┐                                          │   │
+│  │   │ Badge   │ ◀─── │ onCart  │ ◀── ...                                  │   │
+│  │   │ Updates │      │ Updated │                                          │   │
+│  │   └─────────┘      └─────────┘                                          │   │
+│  │                                                                          │   │
+│  │   [MiniMap]              [Zoom: 100%] [Fit View]                        │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                 │
+│  Click node to edit • Drag to reposition • Scroll to zoom • Ctrl+S to save    │
+│                                                                                 │
+└────────────────────────────────────────────────────────────────────────────────┘
+                                                        │
+                                        ┌───────────────┴───────────────┐
+                                        ▼                               ▼
+                              ┌──────────────────┐            ┌──────────────────┐
+                              │  Click Node      │            │  [Export ▼]      │
+                              │  ────────────    │            │  • PNG           │
+                              │  Opens edit      │            │  • SVG           │
+                              │  modal           │            │  • JSON          │
+                              └────────┬─────────┘            └──────────────────┘
+                                       │
+                                       ▼
+                              ┌──────────────────┐
+                              │ ┌──────────────┐ │
+                              │ │ Edit Title   │ │
+                              │ │ ──────────── │ │
+                              │ │ [Add to Cart]│ │
+                              │ │              │ │
+                              │ │ Description  │ │
+                              │ │ ──────────── │ │
+                              │ │ [User clicks]│ │
+                              │ │              │ │
+                              │ │ Source: ...  │ │
+                              │ │              │ │
+                              │ │[Reset][Save] │ │
+                              │ └──────────────┘ │
+                              └──────────────────┘
 ```
 
 ---
 
-### 11. Implementation Steps
+### 12. Implementation Steps
 
 #### Phase 1: Data Model & API (Day 1-2)
-1. Add new database tables (diagrams, diagram_components, diagram_jobs)
-2. Create diagram CRUD endpoints
-3. Create diagram generation job endpoint
-4. Implement job status tracking
+1. Add new database tables (diagrams, diagram_components, diagram_edges)
+2. Add modification tracking fields
+3. Create diagram CRUD endpoints
+4. Create save endpoint for user modifications
+5. Implement component reset endpoint
 
 #### Phase 2: Extraction Engine (Day 3-4)
 1. Create component-specific prompts
 2. Implement full extraction prompt
 3. Build extraction service with LLM calls
 4. Handle partial/missing data (greyed out components)
-5. Store extracted components with source attribution
+5. Store extracted components with initial positions
 
-#### Phase 3: Diagram Rendering (Day 5-7)
-1. Set up SVG canvas component
-2. Implement component box rendering
-3. Build security layer group
-4. Add connection arrows
-5. Implement hover tooltips
-6. Add confidence and source badges
-7. Create legend
+#### Phase 3: ReactFlow Integration (Day 5-8)
+1. Set up ReactFlow with custom node types
+2. Implement BaseNode component with edit button
+3. Create SecurityGroupNode for security layer
+4. Build edge types (request vs response)
+5. Implement viewport controls (zoom, pan, minimap)
+6. Add drag-to-reposition functionality
 
-#### Phase 4: Export & Polish (Day 8-9)
-1. Implement SVG export
-2. Implement PNG export
-3. Add export UI
-4. Loading states and error handling
-5. Responsive canvas sizing
+#### Phase 4: Editing & Saving (Day 9-11)
+1. Implement EditModal component
+2. Add save functionality with optimistic updates
+3. Track unsaved changes
+4. Implement reset to original
+5. Add keyboard shortcuts (Ctrl+S)
+6. Warn before leaving with unsaved changes
 
-#### Phase 5: Integration & Testing (Day 10)
+#### Phase 5: Export & Polish (Day 12-14)
+1. Implement PNG export using html-to-image
+2. Implement SVG export
+3. Implement JSON export
+4. Add Mermaid simple view option
+5. Loading states and error handling
+6. Responsive design
+
+#### Phase 6: Integration & Testing (Day 15)
 1. Integration with MVP1 operations list
 2. End-to-end testing
 3. Performance optimization
@@ -1114,7 +1233,7 @@ MVP2 Addition:                              ┌───────────
 
 ---
 
-### 12. Cost Estimation
+### 13. Cost Estimation
 
 #### LLM Costs (Claude 3 Haiku)
 
@@ -1124,39 +1243,48 @@ MVP2 Addition:                              ┌───────────
 | Medium corpus (50 pages) | ~30,000 | ~2,500 | ~$0.01 |
 | Large corpus (200 pages) | ~120,000 | ~3,000 | ~$0.04 |
 
-*Extraction is more expensive than discovery due to detailed prompting*
-
 #### Infrastructure
 
 Same as MVP1 - near zero with free tier hosting.
 
+#### New Dependencies
+
+| Package | Size | Purpose |
+|---------|------|---------|
+| reactflow | ~150KB | Interactive diagrams |
+| html-to-image | ~20KB | PNG/SVG export |
+| mermaid (optional) | ~1MB | Simple view |
+
 ---
 
-### 13. Success Criteria
+### 14. Success Criteria
 
 The MVP2 is successful if:
 
 1. Diagrams generate in under 90 seconds for typical corpus
 2. At least 60% of components have meaningful extracted data
 3. Components without data are clearly marked as greyed out
-4. Source attribution is visible and accurate
-5. Export produces clean PNG/SVG files
-6. Users can understand the flow at a glance
+4. **Users can drag nodes to reposition them**
+5. **Users can edit component titles and descriptions**
+6. **Users can save their modifications and reload them**
+7. Source attribution is visible and accurate
+8. Export produces clean PNG/SVG files
+9. Users can understand the flow at a glance
 
 ---
 
-### 14. Limitations (Addressed in Future MVPs)
+### 15. Limitations (Addressed in Future MVPs)
 
 | Limitation | Future Enhancement |
 |------------|-------------------|
 | Fixed template only | MVP3: Custom templates |
-| No diagram editing | MVP3: Interactive editing |
-| Single export per operation | MVP3: Multiple diagram versions |
+| Cannot add/remove nodes | MVP3: Full node CRUD |
+| No version history | MVP3: Version tracking & diff |
+| Single user editing | MVP4: Multi-user collaboration |
 | No source navigation | MVP3: Click source to jump to document |
-| Basic styling | MVP4: Theming and customization |
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 2.0*
 *Builds on: MVP1 (Operation Discovery)*
-*Created for MVP2 Development Sprint*
+*Major Update: Added ReactFlow integration, editing, and save functionality*
