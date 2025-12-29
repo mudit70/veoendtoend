@@ -8,6 +8,7 @@ import { projectsRouter } from './routes/projects.js';
 import { documentsRouter } from './routes/documents.js';
 import { discoveryRouter } from './routes/discovery.js';
 import { operationsRouter } from './routes/operations.js';
+import { diagramsRouter } from './routes/diagrams.js';
 import { initializeDatabase } from './database/init.js';
 
 const app = express();
@@ -23,6 +24,7 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api', discoveryRouter);
 app.use('/api', operationsRouter);
+app.use('/api', diagramsRouter);
 
 // Error handling
 app.use(notFoundHandler);
