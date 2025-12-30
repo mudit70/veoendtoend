@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ComponentStatus } from '@veoendtoend/shared';
 
-export interface BaseNodeData {
+export interface BaseNodeData extends Record<string, unknown> {
   title: string;
   description: string;
   status: ComponentStatus;

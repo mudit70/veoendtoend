@@ -34,7 +34,7 @@ const nodeTypeToComponentType: Record<string, ComponentType> = Object.entries(
  * Transform API diagram data to ReactFlow nodes and edges
  */
 export function transformApiToReactFlow(
-  diagram: Diagram,
+  _diagram: Diagram,
   components: DiagramComponent[],
   edges: DiagramEdge[]
 ): { nodes: Node<BaseNodeData>[]; edges: Edge[] } {

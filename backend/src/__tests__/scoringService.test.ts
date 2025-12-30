@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   ScoringService,
   scoringService,
-  type ScoreBreakdown,
   type ComponentWeights,
 } from '../services/scoringService';
 import type { ValidationResult } from '../models/validation';

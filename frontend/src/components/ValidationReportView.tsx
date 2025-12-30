@@ -15,11 +15,6 @@ interface ValidationReportViewProps {
 
 type TabType = 'overview' | 'components' | 'discrepancies';
 
-interface ComponentGroup {
-  status: string;
-  results: ValidationResult[];
-}
-
 export function ValidationReportView({
   validationRun,
   onClose,

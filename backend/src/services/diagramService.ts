@@ -1,7 +1,21 @@
 import type { Diagram, DiagramComponent, DiagramEdge, ComponentType, Job } from '@veoendtoend/shared';
-import { db } from '../database';
+import { getDatabase } from '../database';
 import { v4 as uuidv4 } from 'uuid';
 import { extractionEngine } from './extractionEngine';
+
+interface OperationRow {
+  id: string;
+  name: string;
+  description: string;
+  project_id: string;
+}
+
+interface DocumentRow {
+  id: string;
+  filename: string;
+  content: string;
+  extracted_text: string | null;
+}
 
 export interface DiagramJob extends Job {
   diagramId: string;
@@ -55,7 +69,8 @@ export class DiagramService {
 
   async startDiagramGeneration(operationId: string): Promise<DiagramJob> {
     // Verify operation exists
-    const operation = db.getOperationById(operationId);
+    const db = getDatabase();
+    const operation = db.prepare('SELECT id, name, description, project_id FROM operations WHERE id = ?').get(operationId) as OperationRow | undefined;
     if (!operation) {
       throw new Error('Operation not found');
     }
@@ -114,19 +129,20 @@ export class DiagramService {
       diagram.updatedAt = new Date().toISOString();
 
       // Get operation for context
-      const operation = db.getOperationById(operationId);
+      const db = getDatabase();
+      const operation = db.prepare('SELECT id, name, description, project_id FROM operations WHERE id = ?').get(operationId) as OperationRow | undefined;
       if (!operation) {
         throw new Error('Operation not found');
       }
 
       // Get documents for the operation's project
-      const documents = db.getDocumentsByProjectId(operation.projectId);
+      const documents = db.prepare('SELECT id, filename, content, extracted_text FROM documents WHERE project_id = ?').all(operation.project_id) as DocumentRow[];
 
       // Convert documents to extraction engine format
-      const docContents = documents.map(d => ({
+      const docContents = documents.map((d: DocumentRow) => ({
         id: d.id,
         filename: d.filename,
-        content: d.extractedText || d.content,
+        content: d.extracted_text || d.content,
       }));
 
       // Use extraction engine to get component details
@@ -234,8 +250,8 @@ export class DiagramService {
     for (const diagram of this.diagrams.values()) {
       if (diagram.operationId === operationId) {
         // Return diagram without components/edges for list view
-        const { components: _c, edges: _e, ...diagramBase } = diagram;
-        diagrams.push(diagramBase);
+        const { id, operationId: opId, name, status, viewportState, createdAt, updatedAt } = diagram;
+        diagrams.push({ id, operationId: opId, name, status, viewportState, createdAt, updatedAt });
       }
     }
     return diagrams;
@@ -332,8 +348,8 @@ export class DiagramService {
     }
     diagram.updatedAt = new Date().toISOString();
 
-    const { components: _c, edges: _e, ...diagramBase } = diagram;
-    return diagramBase;
+    const { id, operationId, name, status, viewportState, createdAt, updatedAt } = diagram;
+    return { id, operationId, name, status, viewportState, createdAt, updatedAt };
   }
 
   exportDiagram(diagramId: string, format: 'json'): unknown {

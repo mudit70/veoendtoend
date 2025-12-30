@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/connection.js';
-import { llmClient, type DiscoveredOperation } from './llmClient.js';
-import type { Job, Operation } from '@veoendtoend/shared';
+import { llmClient } from './llmClient.js';
+import type { Job } from '@veoendtoend/shared';
 
 export interface DiscoveryJob extends Job {
   projectId: string;

@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/connection';
 import type {
-  ValidationRun,
   ValidationResult,
   Discrepancy,
   ValidationStatus,

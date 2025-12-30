@@ -27,6 +27,7 @@ describe('ExportMenu', () => {
       position: { x: 0, y: 0 },
       data: {
         title: 'User Action',
+        description: 'User action description',
         status: 'POPULATED',
         confidence: 0.85,
         isUserModified: false,

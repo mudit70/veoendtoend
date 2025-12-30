@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Operation, OperationType } from '@veoendtoend/shared';
+import type { OperationType } from '@veoendtoend/shared';
 
 export interface DiscoveredOperation {
   name: string;

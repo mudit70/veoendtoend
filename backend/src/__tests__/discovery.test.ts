@@ -78,7 +78,8 @@ describe('Discovery API', () => {
         .post(`/api/projects/${testProjectId}/discover`)
         .send();
 
-      const firstJobId = response1.body.data.id;
+      // First job created successfully
+      expect(response1.body.data.id).toBeDefined();
 
       // Try to create second job immediately
       const response2 = await request(app)

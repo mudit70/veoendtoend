@@ -13,7 +13,14 @@ describe('ValidationTrigger', () => {
   const mockStartValidation = vi.fn();
   const mockCancelValidation = vi.fn();
 
-  const defaultHookReturn = {
+  const defaultHookReturn: {
+    isValidating: boolean;
+    validationRun: ValidationRun | null;
+    progress: number;
+    error: string | null;
+    startValidation: typeof mockStartValidation;
+    cancelValidation: typeof mockCancelValidation;
+  } = {
     isValidating: false,
     validationRun: null,
     progress: 0,

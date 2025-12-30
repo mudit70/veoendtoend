@@ -193,7 +193,7 @@ export function NodeEditModal({
                 Source Reference
               </label>
               <div className="p-3 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-600 italic">
-                "{node.sourceExcerpt}"
+                &quot;{node.sourceExcerpt}&quot;
               </div>
             </div>
           )}

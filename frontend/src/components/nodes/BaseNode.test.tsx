@@ -35,6 +35,9 @@ const createNodeProps = (data: Partial<BaseNodeData> = {}) => ({
   isConnectable: true,
   zIndex: 0,
   dragging: false,
+  draggable: true,
+  selectable: true,
+  deletable: false,
   positionAbsoluteX: 0,
   positionAbsoluteY: 0,
 });

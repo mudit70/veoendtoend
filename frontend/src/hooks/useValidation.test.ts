@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useValidation } from './useValidation';
 import { apiClient } from '../api/client';
 
@@ -243,7 +243,7 @@ describe('useValidation', () => {
 
     vi.mocked(apiClient.startValidation).mockResolvedValue({
       success: false,
-      data: null,
+      data: undefined,
       error: 'API error',
     });
 

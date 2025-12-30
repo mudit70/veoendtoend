@@ -56,8 +56,8 @@ describe('diagramExport utilities', () => {
         download: '',
         click: mockClick,
       } as unknown as HTMLAnchorElement);
-      vi.spyOn(document.body, 'appendChild').mockImplementation(() => null as unknown as Node);
-      vi.spyOn(document.body, 'removeChild').mockImplementation(() => null as unknown as Node);
+      vi.spyOn(document.body, 'appendChild').mockImplementation((node) => node);
+      vi.spyOn(document.body, 'removeChild').mockImplementation((node) => node);
     });
 
     afterEach(() => {

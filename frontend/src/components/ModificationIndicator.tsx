@@ -1,4 +1,3 @@
-import React from 'react';
 
 export interface ModificationIndicatorProps {
   /** Whether the item has been modified */

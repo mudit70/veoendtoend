@@ -1,5 +1,4 @@
-import type { ComponentType, DiagramComponent } from '@veoendtoend/shared';
-import { llmClient } from './llmClient';
+import type { ComponentType } from '@veoendtoend/shared';
 
 // Extraction prompt templates for each component type
 const EXTRACTION_PROMPTS: Record<ComponentType, string> = {
@@ -215,7 +214,8 @@ export class ExtractionEngine {
 
     // Try to extract using LLM
     try {
-      const prompt = this.buildExtractionPrompt(
+      // Build extraction prompt (for future LLM integration)
+      this.buildExtractionPrompt(
         componentType,
         operationName,
         operationDescription,

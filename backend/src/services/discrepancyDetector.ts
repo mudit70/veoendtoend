@@ -1,6 +1,5 @@
 import {
   type Discrepancy,
-  type DiscrepancyType,
   getDiscrepancySeverity,
 } from '../models/validation';
 

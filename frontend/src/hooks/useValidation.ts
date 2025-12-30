@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { apiClient, type ValidationRun, type ValidationRunStatus } from '../api/client';
+import { apiClient, type ValidationRun } from '../api/client';
 
 interface UseValidationOptions {
   pollInterval?: number;

@@ -74,7 +74,7 @@ export function DiagramCanvas({
   );
 
   const handleMoveEnd = useCallback(
-    (_event: React.MouseEvent | React.TouchEvent | null, viewport: { x: number; y: number; zoom: number }) => {
+    (_event: unknown, viewport: { x: number; y: number; zoom: number }) => {
       onViewportChange?.(viewport);
     },
     [onViewportChange]

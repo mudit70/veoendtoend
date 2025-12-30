@@ -5,36 +5,36 @@ import { diagramsRouter } from '../routes/diagrams';
 import { DiagramService } from '../services/diagramService';
 
 // Mock the database
+const mockPrepare = vi.fn((sql: string) => ({
+  get: vi.fn((id: string) => {
+    if (sql.includes('operations') && id === 'op-1') {
+      return {
+        id: 'op-1',
+        project_id: 'project-1',
+        name: 'Test Operation',
+        description: 'Test description',
+        type: 'API_CALL',
+        status: 'CONFIRMED',
+        confidence: 0.9,
+      };
+    }
+    return null;
+  }),
+  all: vi.fn(() => [
+    {
+      id: 'doc-1',
+      project_id: 'project-1',
+      filename: 'test.txt',
+      content: 'Test content about API endpoint and database',
+      extracted_text: null,
+    },
+  ]),
+}));
+
 vi.mock('../database', () => ({
-  db: {
-    getOperationById: vi.fn((id: string) => {
-      if (id === 'op-1') {
-        return {
-          id: 'op-1',
-          projectId: 'project-1',
-          name: 'Test Operation',
-          description: 'Test description',
-          type: 'API_CALL',
-          status: 'CONFIRMED',
-          confidence: 0.9,
-          sourceDocumentIds: ['doc-1'],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return null;
-    }),
-    getDocumentsByProjectId: vi.fn(() => [
-      {
-        id: 'doc-1',
-        projectId: 'project-1',
-        filename: 'test.txt',
-        content: 'Test content about API endpoint and database',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ]),
-  },
+  getDatabase: vi.fn(() => ({
+    prepare: mockPrepare,
+  })),
 }));
 
 const app = express();

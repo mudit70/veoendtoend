@@ -67,11 +67,12 @@ function DiscoveryProgress({ job, onDismiss }: DiscoveryProgressProps) {
         return 'Preparing discovery...';
       case 'RUNNING':
         return `Analyzing documents... ${Math.round(job.progress)}%`;
-      case 'COMPLETED':
+      case 'COMPLETED': {
         const result = job.result as { operationsCreated?: number; summary?: string } | undefined;
         return result?.operationsCreated !== undefined
           ? `Found ${result.operationsCreated} operation${result.operationsCreated !== 1 ? 's' : ''}`
           : 'Discovery completed';
+      }
       case 'FAILED':
         return job.error || 'Discovery failed';
       default:
@@ -94,11 +95,11 @@ function DiscoveryProgress({ job, onDismiss }: DiscoveryProgressProps) {
                 />
               </div>
             )}
-            {job.status === 'COMPLETED' && job.result && (
+            {job.status === 'COMPLETED' && job.result ? (
               <p className="text-sm text-gray-600 mt-1">
-                {(job.result as { summary?: string })?.summary}
+                {String((job.result as { summary?: string })?.summary ?? '')}
               </p>
-            )}
+            ) : null}
           </div>
         </div>
         {(job.status === 'COMPLETED' || job.status === 'FAILED') && onDismiss && (

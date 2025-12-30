@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import pdf from 'pdf-parse';
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+const pdf = require('pdf-parse');
 
 export interface ProcessedDocument {
   content: string;

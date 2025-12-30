@@ -1,38 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DiagramService } from '../services/diagramService';
-import type { ComponentType, DiagramComponent, DiagramEdge } from '@veoendtoend/shared';
+import type { ComponentType } from '@veoendtoend/shared';
 
 // Mock the database
+const mockPrepare = vi.fn((sql: string) => ({
+  get: vi.fn((id: string) => {
+    if (sql.includes('operations') && id === 'op-1') {
+      return {
+        id: 'op-1',
+        project_id: 'project-1',
+        name: 'Test Operation',
+        description: 'Test description',
+        type: 'API_CALL',
+        status: 'CONFIRMED',
+        confidence: 0.9,
+      };
+    }
+    return null;
+  }),
+  all: vi.fn(() => [
+    {
+      id: 'doc-1',
+      project_id: 'project-1',
+      filename: 'test.txt',
+      content: 'User clicks button, frontend React code calls POST /api/endpoint. Backend service queries database.',
+      extracted_text: null,
+    },
+  ]),
+}));
+
 vi.mock('../database', () => ({
-  db: {
-    getOperationById: vi.fn((id: string) => {
-      if (id === 'op-1') {
-        return {
-          id: 'op-1',
-          projectId: 'project-1',
-          name: 'Test Operation',
-          description: 'Test description',
-          type: 'API_CALL',
-          status: 'CONFIRMED',
-          confidence: 0.9,
-          sourceDocumentIds: ['doc-1'],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return null;
-    }),
-    getDocumentsByProjectId: vi.fn(() => [
-      {
-        id: 'doc-1',
-        projectId: 'project-1',
-        filename: 'test.txt',
-        content: 'User clicks button, frontend React code calls POST /api/endpoint. Backend service queries database.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ]),
-  },
+  getDatabase: vi.fn(() => ({
+    prepare: mockPrepare,
+  })),
 }));
 
 describe('Diagram Components & Edges', () => {

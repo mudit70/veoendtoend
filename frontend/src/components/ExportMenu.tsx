@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import type { BaseNodeData } from './nodes/BaseNode';
 import {
@@ -46,7 +46,7 @@ export function ExportMenu({
   // Close menu when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(event.target as globalThis.Node)) {
         setIsOpen(false);
       }
     }

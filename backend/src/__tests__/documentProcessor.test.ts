@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { DocumentProcessor, documentProcessor } from '../services/documentProcessor.js';
+import { describe, it, expect } from 'vitest';
+import { documentProcessor } from '../services/documentProcessor.js';
 
 describe('DocumentProcessor', () => {
   describe('process', () => {

@@ -2,7 +2,6 @@ import { getDatabase } from '../database/connection';
 import {
   type ValidationResult,
   type ValidationStatus,
-  type Discrepancy,
   type ValidationSummary,
   calculateValidationScore,
   createValidationSummary,
