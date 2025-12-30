@@ -1,5 +1,51 @@
 import type { Project, Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult, Operation, Job, Diagram, DiagramComponent, DiagramEdge } from '@veoendtoend/shared';
 
+// Validation types
+export type ValidationStatus = 'VALID' | 'WARNING' | 'INVALID' | 'UNVERIFIABLE' | 'STALE';
+export type ValidationRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+
+export interface Discrepancy {
+  type: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  message: string;
+  expectedValue?: string;
+  actualValue?: string;
+  sourceDocumentId?: string;
+}
+
+export interface ValidationResult {
+  id: string;
+  validationRunId: string;
+  componentId: string;
+  status: ValidationStatus;
+  discrepancies: Discrepancy[];
+  confidence: number;
+  createdAt: string;
+}
+
+export interface ValidationRun {
+  id: string;
+  diagramId: string;
+  status: ValidationRunStatus;
+  score: number | null;
+  totalComponents: number;
+  validatedComponents: number;
+  startedAt: string;
+  completedAt: string | null;
+  results?: ValidationResult[];
+}
+
+export interface ValidationSummary {
+  totalComponents: number;
+  validCount: number;
+  warningCount: number;
+  invalidCount: number;
+  unverifiableCount: number;
+  staleCount: number;
+  overallScore: number;
+  lastValidatedAt: string | null;
+}
+
 export interface DiscoveryJob extends Job {
   projectId: string;
 }
@@ -306,5 +352,24 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ format }),
     });
+  },
+
+  // Validation
+  async startValidation(diagramId: string): Promise<ApiResponse<{ validationId: string }>> {
+    return request(`/diagrams/${diagramId}/validate`, {
+      method: 'POST',
+    });
+  },
+
+  async getValidationStatus(validationId: string): Promise<ApiResponse<ValidationRun>> {
+    return request(`/validations/${validationId}/status`);
+  },
+
+  async getValidationReport(validationId: string): Promise<ApiResponse<ValidationRun>> {
+    return request(`/validations/${validationId}`);
+  },
+
+  async getValidationHistory(diagramId: string): Promise<ApiResponse<ValidationRun[]>> {
+    return request(`/diagrams/${diagramId}/validations`);
   },
 };
