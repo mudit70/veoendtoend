@@ -1,7 +1,17 @@
-import type { Project, Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult, Operation, Job } from '@veoendtoend/shared';
+import type { Project, Document, ApiResponse, FolderImportRequest, RepoImportRequest, ImportResult, Operation, Job, Diagram, DiagramComponent, DiagramEdge } from '@veoendtoend/shared';
 
 export interface DiscoveryJob extends Job {
   projectId: string;
+}
+
+export interface DiagramJob extends Job {
+  diagramId: string;
+  operationId: string;
+}
+
+export interface DiagramWithDetails extends Diagram {
+  components: DiagramComponent[];
+  edges: DiagramEdge[];
 }
 
 const API_BASE_URL = '/api';
@@ -243,6 +253,58 @@ export const apiClient = {
   async rejectOperation(id: string): Promise<ApiResponse<Operation>> {
     return request(`/operations/${id}/reject`, {
       method: 'POST',
+    });
+  },
+
+  // Diagrams
+  async startDiagramGeneration(projectId: string, operationId: string): Promise<ApiResponse<DiagramJob>> {
+    return request(`/projects/${projectId}/operations/${operationId}/diagrams`, {
+      method: 'POST',
+    });
+  },
+
+  async getDiagramJob(jobId: string): Promise<ApiResponse<DiagramJob>> {
+    return request(`/diagram-jobs/${jobId}`);
+  },
+
+  async getDiagram(diagramId: string): Promise<ApiResponse<DiagramWithDetails>> {
+    return request(`/diagrams/${diagramId}`);
+  },
+
+  async getDiagramsForOperation(projectId: string, operationId: string): Promise<ApiResponse<Diagram[]>> {
+    return request(`/projects/${projectId}/operations/${operationId}/diagrams`);
+  },
+
+  async updateDiagram(diagramId: string, data: {
+    name?: string;
+    viewportState?: { x: number; y: number; zoom: number };
+  }): Promise<ApiResponse<Diagram>> {
+    return request(`/diagrams/${diagramId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateComponent(diagramId: string, componentId: string, data: {
+    title?: string;
+    description?: string;
+  }): Promise<ApiResponse<DiagramComponent>> {
+    return request(`/diagrams/${diagramId}/components/${componentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async resetComponent(diagramId: string, componentId: string): Promise<ApiResponse<DiagramComponent>> {
+    return request(`/diagrams/${diagramId}/components/${componentId}/reset`, {
+      method: 'POST',
+    });
+  },
+
+  async exportDiagram(diagramId: string, format = 'json'): Promise<ApiResponse<unknown>> {
+    return request(`/diagrams/${diagramId}/export`, {
+      method: 'POST',
+      body: JSON.stringify({ format }),
     });
   },
 };
